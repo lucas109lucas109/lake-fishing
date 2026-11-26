@@ -31,8 +31,13 @@
     <button id="dexBtn" class="smallBtn">도감 (Q)</button>
     <button id="setBtn" class="smallBtn">설정</button>
     <button id="multiBtn" class="smallBtn">멀티</button>
+    <button id="accountBtn" class="smallBtn hidden">로그인</button>
     <div id="multiHud" class="hudLine hidden"></div>
   </div>
+  <div id="islandHud" class="hidden"></div>
+  <div id="glitchHud" class="hidden"></div>
+  <div id="glitchFx"></div>
+  <div id="sleepFade"></div>
   <div id="keys">WASD 이동 · R 달리기 · 오른쪽 드래그 화면 회전 · Shift 시프트 락 · 휠 확대 · 클릭 낚시 · 스페이스 점프 · E 상호작용 · 1~9 인벤토리</div>
   <div id="lockDot" class="hidden"></div>
   <div id="lockHint" class="hidden"></div>
@@ -62,9 +67,37 @@
     </div>
   </div>
 
+  <div id="housePanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>섬 위의 집</span><button class="closeBtn" data-close="housePanel">닫기</button></div>
+      <div id="houseInfo"></div>
+    </div>
+  </div>
+
+  <div id="tankPanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>어항 · 물고기 전시</span><button class="closeBtn" data-close="tankPanel">닫기</button></div>
+      <div class="count">넣은 물고기는 어항 속을 헤엄쳐요. 팔리지 않고 안전하게 보관돼요. 원할 때 꺼내서 다시 가방에 넣을 수 있어요.</div>
+      <div id="tankList"></div>
+    </div>
+  </div>
+
+  <div id="cloudPanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>어느 기록으로 할까요?</span></div>
+      <div id="cloudChoice"></div>
+    </div>
+  </div>
+
   <div id="setPanel" class="modal hidden">
     <div class="modalBox">
       <div class="modalHead"><span>설정</span><button class="closeBtn" data-close="setPanel">닫기</button></div>
+      <div class="setRow col">
+        <div><div class="nm">그래픽</div><div class="ds">게임이 느리면 '빠름'으로 바꿔요. 자동은 느린 컴퓨터에서 알아서 낮춰요. <b id="gfxNote"></b></div><div class="ds" id="perfInfo"></div></div>
+        <div id="optGfx" class="dressOpts">
+          <button class="optBtn" data-gfx="auto">자동</button><button class="optBtn" data-gfx="high">좋음</button><button class="optBtn" data-gfx="mid">보통</button><button class="optBtn" data-gfx="low">빠름</button>
+        </div>
+      </div>
       <div class="setRow">
         <div><div class="nm">시프트 락</div><div class="ds">켜 두면 Shift 키로 마우스를 화면에 고정해요. 캐릭터가 카메라 방향을 바라봐요.</div></div>
         <button id="optShift" class="toggle"></button>
@@ -76,6 +109,13 @@
       <div class="setRow">
         <div><div class="nm">상하 반전</div><div class="ds">마우스를 위로 올리면 화면이 아래를 봐요.</div></div>
         <button id="optInvert" class="toggle"></button>
+      </div>
+      <div id="accountRow" class="setRow col hidden">
+        <div><div class="nm">계정 (구글 로그인)</div><div class="ds" id="accountName"></div><div class="ds" id="accountMsg"></div></div>
+        <div class="saveBtns">
+          <button id="accountLogin" class="actBtn">구글로 로그인</button>
+          <button id="accountLogout" class="actBtn hidden">로그아웃</button>
+        </div>
       </div>
       <div class="setRow col">
         <div><div class="nm">저장 / 불러오기</div><div class="ds">기록(돈·물고기·낚싯대·도감)을 다른 컴퓨터나 다른 사이트 주소로 옮길 때 써요.</div></div>

@@ -197,7 +197,7 @@ export function setupMulti(ctx) {
         if (bt >= 0) { r.boat = makeBoatModel(bt); scene.add(r.boat); }
       }
       if (r.boat) {
-        r.boat.position.set(g.position.x - Math.sin(g.rotation.y) * 0.25, g.position.y + 0.6 - (bt === 1 ? 0.48 : 0.38), g.position.z - Math.cos(g.rotation.y) * 0.25);
+        r.boat.position.set(g.position.x - Math.sin(g.rotation.y) * 0.25, g.position.y + 0.6 - (r.boat.userData.seat ?? 0.38), g.position.z - Math.cos(g.rotation.y) * 0.25);
         r.boat.rotation.set(0, g.rotation.y, Math.sin(t * 1.1) * 0.03);
       }
       if (s.n !== r.shownN) { r.shownN = s.n; r.tag.draw(r.name, s.n); }

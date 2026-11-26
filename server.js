@@ -192,7 +192,7 @@ function cleanState(s) {
   return {
     x: num(s.x, -200, 200), y: num(s.y, -5, 30), z: num(s.z, -200, 200), r: num(s.r, -100, 100),
     a: ANIMS.has(s.a) ? s.a : 'idle', rod: Math.floor(num(s.rod, -1, 30)),
-    f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 16) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob, bt: s.bt == null ? -1 : Math.floor(num(s.bt, -1, 5))
+    f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 24) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob, bt: s.bt == null ? -1 : Math.floor(num(s.bt, -1, 15))
   };
 }
 // 옷차림: 정해진 칸에 숫자만 받아요
@@ -231,7 +231,7 @@ function handle(c, msg) {
     if (c.state) broadcast(c.room, { t: 's', id: c.id, s: c.state }, c);
   } else if (msg.t === 'catch') {
     // 잡은 물고기 소식: 이름·이로치·무게만 전해요
-    broadcast(c.room, { t: 'catch', id: c.id, f: clean(msg.f, 20), m: msg.m ? clean(msg.m, 16) : null, w: num(msg.w, 0, 10000) }, c);
+    broadcast(c.room, { t: 'catch', id: c.id, f: clean(msg.f, 20), m: msg.m ? clean(msg.m, 24) : null, w: num(msg.w, 0, 10000) }, c);
   } else if (msg.t === 'outfit') {
     // 탈의실에서 옷을 바꿨어요
     c.outfit = cleanOutfitMsg(msg.o);

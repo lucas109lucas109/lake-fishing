@@ -11,10 +11,11 @@
 #   - cdn.jsdelivr.net = three.js, cdn.cinevva.com = 나무 모델, youtube = 유튜브 노래(켰을 때만)
 #   - fonts.googleapis.com / fonts.gstatic.com = 대사 글씨체(고운돋움, 주아)
 #   - blob: 은 나무 모델 안의 텍스처를 꺼낼 때 브라우저가 잠깐 만드는 주소예요 (막으면 나무 색이 깨져요)
+#   - www.gstatic.com = Firebase 프로그램, *.googleapis.com = 구글 로그인·기록 저장, *.firebaseapp.com = 로그인 창
 
 /*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-qC+YWhF3NPdIQ5KTB3TZrbgffn9kAvaLLFtTKaG1N4c=' https://cdn.jsdelivr.net https://www.youtube.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://cdn.cinevva.com; media-src 'self'; frame-src https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-qC+YWhF3NPdIQ5KTB3TZrbgffn9kAvaLLFtTKaG1N4c=' https://cdn.jsdelivr.net https://www.youtube.com https://www.gstatic.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://cdn.cinevva.com https://www.gstatic.com https://*.googleapis.com https://*.firebaseapp.com; media-src 'self'; frame-src https://www.youtube.com https://*.firebaseapp.com https://accounts.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'

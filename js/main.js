@@ -6,7 +6,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { YOUTUBE_LINK, SHOW_YOUTUBE, MUSIC_FILE, MUSIC_VOLUME } from './settings.js';
 import { setupMulti, PLAYER_LOOKS } from './multi.js';
-import { RARITY, FISH, MUTATIONS, rollFish, findFish, mutList, mutKey, priceOf, fmtKg, makeFishModel, fishScale, zoneOf as fishZone } from './fish.js';
+import { startStaticMerge, compactRig } from './optimize.js';
+import { buildSeaWorld, HOUSE_STYLES } from './seaworld.js';
+import { cloudEnabled, startCloud, signIn, signOutCloud, loadCloud, saveCloud, watchHouses, claimHouse, setHouseStyleCloud, releaseHouse } from './cloud.js';
+import { RARITY, FISH, MUTATIONS, rarityOdds, rollFish, updateFishFx, findFish, mutList, mutKey, priceOf, fmtKg, makeFishModel, fishScale, zoneOf as fishZone } from './fish.js';
+
+// 글씨체(주아체)를 먼저 불러와요. 이름표·간판을 그림으로 그릴 때 이 글씨체가 있어야 예뻐요 (최대 2.5초만 기다려요)
+try { await Promise.race([Promise.all([document.fonts.load('40px "Jua"'), document.fonts.load('20px "Gowun Dodum"')]), new Promise((r) => setTimeout(r, 2500))]); } catch (_) {}
 
 // 이로치 이름을 각자 색으로 칠한 HTML ("골드 다이아")
 const mutHTML = (str) => mutList(str).map((m) => `<span style="color:${m.color}">${m.name}</span>`).join(' ');
@@ -19,7 +25,11 @@ scene.background = new THREE.Color(0xeca77c);
 scene.fog = new THREE.Fog(0xe0a07e, 30, 115);
 const camera = new THREE.PerspectiveCamera(43, innerWidth / innerHeight, 0.1, 220);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+// 그래픽 품질: 'auto'(자동) | 'high'(좋음) | 'mid'(보통) | 'low'(빠름) — 설정 창에서 바꿔요
+let GFX = 'auto';
+try { const o = JSON.parse(localStorage.getItem('lakeFishing_options')); if (o && ['auto', 'high', 'mid', 'low'].includes(o.gfx)) GFX = o.gfx; } catch (_) {}
+// '빠름'일 땐 가장자리 매끈하게(안티앨리어싱)도 꺼서 더 빨라요 (이건 새로고침해야 바뀌어요)
+const renderer = new THREE.WebGLRenderer({ antialias: GFX !== 'low', powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight, true);
 renderer.shadowMap.enabled = true;
@@ -46,10 +56,78 @@ const violetGlow = new THREE.PointLight(0x9a6bff, 40, 40, 2);
 violetGlow.position.set(0, 3, -12);
 scene.add(violetGlow);
 
+// ---------- 그래픽 품질 ----------
+//  pr = 화면 해상도 배율(낮을수록 빨라요), shadow = 그림자, soft = 부드러운 그림자, far = 얼마나 멀리까지 그릴지
+const GFX_LEVELS = {
+  high: { pr: Math.min(devicePixelRatio, 2), shadow: true, soft: true, far: 220 },
+  mid:  { pr: Math.min(devicePixelRatio, 1), shadow: true, soft: false, far: 160 },
+  low:  { pr: Math.min(devicePixelRatio, 1) * 0.7, shadow: false, soft: false, far: 125 }
+};
+let gfxNow = null;
+let shadowFrame = 0;
+function applyGfx(level) {
+  const g = GFX_LEVELS[level];
+  if (!g || gfxNow === level) return;
+  const before = gfxNow && GFX_LEVELS[gfxNow];
+  gfxNow = level;
+  renderer.setPixelRatio(g.pr);
+  renderer.setSize(innerWidth, innerHeight, true);
+  renderer.shadowMap.enabled = g.shadow;
+  renderer.shadowMap.autoUpdate = false; // 언제 다시 그릴지는 매 장면 직접 정해요 (animate 맨 끝)
+  renderer.shadowMap.type = g.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  sunsetLight.castShadow = g.shadow;
+  camera.far = g.far;
+  camera.updateProjectionMatrix();
+  // 그림자를 켜고 끄면 물감(재질)을 다시 만들어야 해요
+  if (before && (before.shadow !== g.shadow || before.soft !== g.soft)) {
+    scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => (m.needsUpdate = true)); });
+  }
+}
+// 자동: '보통'으로 시작해서, 3초 동안 평균이 초당 35장(FPS)도 안 나오면 '빠름'으로 낮춰요
+const gfxAuto = { t: 0, frames: 0, skip: 2 };
+function gfxAutoTick(dt) {
+  if (GFX !== 'auto' || gfxNow === 'low') return;
+  if (gfxAuto.skip > 0) { gfxAuto.skip -= dt; return; } // 처음 불러오는 동안은 빼고 재요
+  // 다른 탭을 보거나 창을 내려 두면 브라우저가 일부러 느리게 돌려요 → 그땐 재지 않아요
+  if (document.hidden || !document.hasFocus() || dt > 0.25) { gfxAuto.t = 0; gfxAuto.frames = 0; return; }
+  gfxAuto.t += dt; gfxAuto.frames++;
+  if (gfxAuto.t < 3) return;
+  const fps = gfxAuto.frames / gfxAuto.t;
+  gfxAuto.t = 0; gfxAuto.frames = 0;
+  if (fps < 35) { applyGfx('low'); game.notice = '컴퓨터가 버거워해서 그래픽을 "빠름"으로 낮췄어요. (설정에서 바꿀 수 있어요)'; updateUI(); }
+}
+// 브라우저 그래픽 가속이 꺼져 있으면(그래픽카드 대신 CPU가 그림) 엄청 느려요 → 알아채서 안내해요
+const GPU_NAME = (() => {
+  try { const gl = renderer.getContext(), d = gl.getExtension('WEBGL_debug_renderer_info'); return d ? String(gl.getParameter(d.UNMASKED_RENDERER_WEBGL)) : ''; } catch (_) { return ''; }
+})();
+const SOFTWARE_GPU = /swiftshader|llvmpipe|software|basic render/i.test(GPU_NAME);
+if (SOFTWARE_GPU && GFX === 'auto') GFX = 'low';
+applyGfx(GFX === 'auto' ? 'mid' : GFX);
+if (SOFTWARE_GPU) {
+  // 화면 위에 안내 띠 (눌러서 닫을 수 있어요)
+  const bar = document.createElement('div');
+  bar.id = 'gpuWarn';
+  bar.textContent = '브라우저 그래픽 가속이 꺼져 있어서 게임이 아주 느릴 수 있어요. 크롬 설정 → 시스템 → "가능한 경우 그래픽 가속 사용"을 켜고 크롬을 다시 켜 주세요. (눌러서 닫기)';
+  bar.addEventListener('click', () => bar.remove());
+  document.body.appendChild(bar);
+}
+// 초당 화면 수(FPS) 재기 — 설정 창에 보여 줘요
+const fpsMeter = { frames: 0, t: 0, value: 0 };
+function tickFps(rawMs) {
+  fpsMeter.frames++; fpsMeter.t += rawMs;
+  if (fpsMeter.t >= 1000) { fpsMeter.value = Math.round(fpsMeter.frames * 1000 / fpsMeter.t); fpsMeter.frames = 0; fpsMeter.t = 0; const el = document.getElementById('perfInfo'); if (el) el.textContent = perfText(); }
+}
+const perfText = () => `지금 초당 ${fpsMeter.value}장 · 그래픽카드: ${GPU_NAME.replace(/^ANGLE \(|\)$/g, '').split(',').slice(0, 2).join(',') || '알 수 없음'}${SOFTWARE_GPU ? ' (그래픽 가속 꺼짐!)' : ''}`;
+// 움직이지 않는 물체 합치기: 첫 화면이 그려지고 2초 뒤부터 4초 동안 지켜본 다음 합쳐요
+setTimeout(() => {
+  scene.updateMatrixWorld(true);
+  startStaticMerge({ THREE, scene, protect: new Set(LANTERN_MATS), waitMs: 4000, onDone: (n) => console.log(`[최적화] 안 움직이는 물체 ${n}개를 합쳤어요`) });
+}, 2000);
+
 const mat = (color, roughness = 0.86, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness, ...extra });
 
 // ---------- 땅 ----------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), mat(0x607856));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), mat(0x607856)); // 바다 끝까지 덮게 넓게
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.08;
 ground.receiveShadow = true;
@@ -83,6 +161,16 @@ const WATERS = [
   ...[[-50, 12], [-53, 2], [-57, -8], [-56, -18], [-52, -28], [-55, -38]].map(([x, z], i) => (
     { x, z, rx: 6.6, rz: 6.2, y: 0.03 + i * 0.001, zone: 'aurora', aurora: true, river: true, luck: 0.04, biteMul: 1.75, name: '오로라 강' }))
 ];
+// 풍차 뒤(남쪽)의 엄청 큰 바다. 쭉 헤엄치거나 보트로 가면 섬이 나와요
+//  pad = 모래사장 너비, maxSeg = 물결 칸 수 상한 (너무 크면 무거워서)
+const SEA = { x: -10, z: 100, rx: 115, rz: 74, y: 0.1, zone: 'sea', sea: true, name: '바다', luck: 0.03, biteMul: 1.15, pad: 7, maxSeg: 56 };
+// 정글섬: 바다 저 멀리 동남쪽. 섬 안 정글 연못에는 아주 비싼 정글 물고기가 살아요 (정글 공방 낚싯대로만!)
+const JUNGLE = { x: 66, z: 104, r: 27 };
+const JUNGLE_POND = { x: JUNGLE.x + 9, z: JUNGLE.z + 2, rx: 11, rz: 8, y: 0.3, zone: 'jungle', jungle: true, name: '정글 연못', luck: 0.06, biteMul: 1.3, pad: 0.3 };
+WATERS.push(JUNGLE_POND);
+WATERS.push(SEA);
+// 바다 위 부두(모래사장에서 바다로 쭉 뻗은 나무 다리)
+const SEA_PIER = { x0: -11.1, x1: -8.9, z0: 21.5, z1: 38 };
 const RIVER = WATERS.filter((e) => e.aurora);
 // (x, z) 에 있는 물과, 물 한가운데서 얼마나 떨어졌는지(d: 0=가운데, 1=가장자리)
 function waterInfo(x, z, margin = 0) {
@@ -99,7 +187,7 @@ const inLake = (x, z, margin = 0) => !!waterAt(x, z, margin);
 const SHALLOW = 0.86;
 function isShallow(x, z) {
   const w = waterInfo(x, z);
-  return !!w && (w.e.stream || w.d > SHALLOW);
+  return !!w && (w.e.stream || w.e.jungle || w.d > SHALLOW); // 정글 연못은 전부 얕아요 (걸어 들어가요)
 }
 
 // 언덕 만들기: 큰 바위 덩어리 + 풀 덮개 + 울퉁불퉁 튀어나온 바위들
@@ -193,15 +281,16 @@ const auroraWaterMat = new THREE.MeshStandardMaterial({ color: 0x2a9aa8, roughne
 const auroraSandMat = mat(0xb8aac8, 0.95); // 보랏빛 모래
 WATERS.forEach((e, k) => {
   // 물가 모래 (개울은 모래 테두리를 얇게)
-  const pad = e.stream ? 0.35 : e.river ? 1.3 : 0.9;
-  const shore = new THREE.Mesh(new THREE.CircleGeometry(1, 64), e.aurora ? auroraSandMat : mat(0x8c7c5a));
+  const pad = e.pad ?? (e.stream ? 0.35 : e.river ? 1.3 : 0.9);
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(1, e.sea ? 128 : 64), e.aurora ? auroraSandMat : e.sea ? mat(0xe8d4a4, 0.95) : mat(0x8c7c5a)); // 바다는 밝은 모래사장
   shore.rotation.x = -Math.PI / 2;
   shore.scale.set(e.rx + pad, e.rz + pad, 1);
   shore.position.set(e.x, e.y > 1 ? PLATEAU_TOP + 0.02 + k * 0.001 : -0.06 + k * 0.001, e.z);
   shore.receiveShadow = true;
   scene.add(shore);
   // 네모난 판을 타원 모양으로 오므려서 물을 만들어요
-  const geo = new THREE.PlaneGeometry(e.rx * 2, e.rz * 2, Math.ceil(e.rx * 4), Math.ceil(e.rz * 4));
+  const seg = (r) => Math.min(Math.ceil(r * 4), e.maxSeg ?? 1e9);
+  const geo = new THREE.PlaneGeometry(e.rx * 2, e.rz * 2, seg(e.rx), seg(e.rz));
   const pa = geo.attributes.position;
   for (let i = 0; i < pa.count; i++) {
     const x = pa.getX(i), y = pa.getY(i);
@@ -241,7 +330,7 @@ WATERS.forEach((e, k) => {
     foamMats.push(fm);
   }
   // 작은 물은 물결을 반만 (출렁이다 테두리 아래로 숨지 않게)
-  waterParts.push({ geo, base: pa.array.slice(), ox: e.x, oz: e.z, amp: e === LAKE ? 1 : 0.45 });
+  waterParts.push({ geo, base: pa.array.slice(), ox: e.x, oz: e.z, amp: e === LAKE ? 1 : e.sea ? 1.3 : 0.45, every: e.sea ? 2 : 1, tick: 0 }); // 바다는 너무 커서 두 번에 한 번만
 });
 
 // ---------- 폭포: 언덕 위 물길에서 절벽 아래 개울로 떨어져요 ----------
@@ -335,7 +424,8 @@ for (const x of [-2.12, 2.12]) {
   rail.castShadow = true;
   dock.add(rail);
 }
-const onDock = (x, z) => x > DOCK.x0 && x < DOCK.x1 && z > DOCK.z0 && z < DOCK.z1;
+const onDock = (x, z) => (x > DOCK.x0 && x < DOCK.x1 && z > DOCK.z0 && z < DOCK.z1) ||
+  (x > SEA_PIER.x0 && x < SEA_PIER.x1 && z > SEA_PIER.z0 && z < SEA_PIER.z1); // 바다 부두도 부두예요
 
 // 등불 (보랏빛 불꽃) — 밤이 되면 더 밝아져요
 const LANTERN_MATS = [];
@@ -1028,6 +1118,8 @@ function makeBlockPerson(o) {
   const armR = makeArm(1);
   armL.rotation.set(1.2, 0, 0.35);
   armR.rotation.set(1.2, 0, -0.35);
+  g.userData.dynamic = true; // 사람은 움직이니까 최적화(합치기)에서 빼요
+  compactRig(THREE, g, new Set(faceParts)); // 같은 색 블록끼리 붙여서 가볍게 (움직임은 그대로)
   return { group: g, head, armL, armR, legs, faceParts };
 }
 
@@ -1093,7 +1185,7 @@ person.add(tag);
 function drawTag(n) {
   const c = tagCanvas.getContext('2d');
   c.clearRect(0, 0, 256, 128);
-  c.font = '900 86px "Malgun Gothic", sans-serif';
+  c.font = '86px "Jua", "Malgun Gothic", sans-serif';
   c.textAlign = 'center';
   c.textBaseline = 'middle';
   c.lineWidth = 12;
@@ -1137,35 +1229,42 @@ function removeWhite(img) {
 // 모양: color→color2 (손잡이 쪽에서 끝으로 색이 바뀌어요), grip 손잡이, accent 장식 띠, reel 릴 색
 //       rings 장식 띠 개수, tip 끝 장식(gem/crystal/star), orbit 끝에서 빙글빙글 도는 조각 수
 const RODS = [
-  { name: '기본 낚싯대',   price: 0,     luck: 0,    reel: 1.0,  bite: 1.0,  zone: 0,
+  { name: '기본 낚싯대',   price: 0,     luck: 0, reel: 1.0, bite: 1.0, zone: 0, perk: '처음 받은 정든 낚싯대',
     color: 0x6e5038, color2: 0x8a6a48, grip: 0xc9a26a, accent: 0x3a2a1e, reelC: 0x30343c, rings: 0 },
-  { name: '대나무 낚싯대', price: 150,   luck: 0.05, reel: 1.1,  bite: 0.9,  zone: 0.03,
+  { name: '대나무 낚싯대', price: 150,   luck: 0.04, reel: 1.05, bite: 0.95, zone: 0.1, perk: '특기: 초록 칸이 넓어요 (노을빛·그림자보다 넓어요!)',
     color: 0xb09848, color2: 0xd8c070, grip: 0x6a4a2a, accent: 0x7a6a30, reelC: 0x5a5a5a, rings: 6 },
-  { name: '탄소 낚싯대',   price: 600,   luck: 0.1,  reel: 1.2,  bite: 0.8,  zone: 0.05,
+  { name: '탄소 낚싯대',   price: 600,   luck: 0.07, reel: 1.5, bite: 0.85, zone: 0.03, perk: '특기: 게이지가 빨라요 (그림자 낚싯대보다 빨라요!)',
     color: 0x1e2026, color2: 0x30343e, grip: 0x2a2a2a, accent: 0xd03030, reelC: 0xb8bcc4, rings: 4, metal: 0.5, rough: 0.22 },
-  { name: '노을빛 낚싯대', price: 2000,  luck: 0.18, reel: 1.3,  bite: 0.68, zone: 0.07,
+  { name: '노을빛 낚싯대', price: 2000,  luck: 0.22, reel: 1.2, bite: 0.8, zone: 0.05, perk: '특기: 운이 좋아요 (그림자 낚싯대만큼!)',
     color: 0xc8401a, color2: 0xffc24a, grip: 0x4a2a1a, accent: 0xffd36b, reelC: 0xd8a84a, rings: 5, metal: 0.55, rough: 0.3, glow: 0xff6a1a, tip: 'gem' },
-  { name: '그림자 낚싯대', price: 5000,  luck: 0.28, reel: 1.38, bite: 0.58, zone: 0.08,
+  { name: '그림자 낚싯대', price: 5000,  luck: 0.2, reel: 1.3, bite: 0.42, zone: 0.06, perk: '특기: 입질이 빨라요 (별빛·솜사탕보다 빨라요!)',
     color: 0x150e20, color2: 0x3a2458, grip: 0x120c1a, accent: 0xb07cff, reelC: 0x2a1f3d, rings: 7, metal: 0.4, rough: 0.3, glow: 0x9a5cff, tip: 'crystal', orbit: 3 },
-  { name: '별빛 낚싯대',   price: 12000, luck: 0.4,  reel: 1.5,  bite: 0.48, zone: 0.11,
+  { name: '별빛 낚싯대',   price: 12000, luck: 0.36, reel: 1.45, bite: 0.55, zone: 0.14, perk: '특기: 골고루 좋은 만능 낚싯대',
     color: 0xe6ecff, color2: 0xa8d4ff, grip: 0x2a3a5a, accent: 0x9fd8ff, reelC: 0xe8eef8, rings: 6, metal: 0.45, rough: 0.12, glow: 0x7fc4ff, tip: 'star', orbit: 6 },
   // ---- 언덕 위 상점에서만 팔아요 (shop: 'mountain') ----
-  { name: '솜사탕 낚싯대', shop: 'mountain', price: 20000, luck: 0.46, reel: 1.56, bite: 0.44, zone: 0.12,
+  { name: '솜사탕 낚싯대', shop: 'mountain', price: 20000, luck: 0.4, reel: 1.5, bite: 0.52, zone: 0.19, perk: '특기: 초록 칸이 아주 넓어요 (은하수보다 넓어요!)',
     color: 0xffb6d5, color2: 0xb8e0ff, grip: 0xfff0f8, accent: 0xff6aa8, reelC: 0xffe0ee, rings: 8, metal: 0.1, rough: 0.4, glow: 0xff8ac8, tip: 'gem', orbit: 4 },
-  { name: '용암 낚싯대', shop: 'mountain', price: 45000, luck: 0.53, reel: 1.66, bite: 0.4, zone: 0.13,
+  { name: '용암 낚싯대', shop: 'mountain', price: 45000, luck: 0.45, reel: 2.05, bite: 0.45, zone: 0.1, perk: '특기: 게이지가 엄청 빨라요 (은하수보다 빨라요!)',
     color: 0x1a1210, color2: 0x3a1a10, grip: 0x0c0806, accent: 0xff6a1a, reelC: 0x2a1a14, rings: 9, metal: 0.3, rough: 0.5, glow: 0xff5a10, tip: 'crystal', orbit: 5 },
-  { name: '은하수 낚싯대', shop: 'mountain', price: 100000, luck: 0.62, reel: 1.8, bite: 0.34, zone: 0.15,
+  { name: '은하수 낚싯대', shop: 'mountain', price: 100000, luck: 0.66, reel: 1.65, bite: 0.38, zone: 0.13, perk: '특기: 운이 아주 좋아요',
     color: 0x0a0a2a, color2: 0x3a2a7a, grip: 0x14143a, accent: 0xc8b8ff, reelC: 0x1a1a4a, rings: 10, metal: 0.5, rough: 0.15, glow: 0x9a8aff, tip: 'star', orbit: 9 },
   // ---- 오로라 강 상점에서만 팔아요 (shop: 'aurora') — 성능은 기존 낚싯대들 사이 ----
   // 산호: 분홍·주황 산호 가지가 자라난 낚싯대, 끝에 빛나는 진주, 조개껍데기 릴
-  { name: '산호 낚싯대', shop: 'aurora', price: 9000, luck: 0.34, reel: 1.44, bite: 0.52, zone: 0.09, style: 'coral',
+  { name: '산호 낚싯대', shop: 'aurora', price: 9000, luck: 0.3, reel: 1.35, bite: 0.48, zone: 0.21, perk: '특기: 초록 칸이 제일 넓어요 (정글 전까지!)', style: 'coral',
     color: 0xff8a7a, color2: 0xffc8a8, grip: 0x2a5a6a, accent: 0xfff0e0, reelC: 0xffe8d8, rings: 4, metal: 0.15, rough: 0.45, glow: 0xffd8e8, tip: 'pearl', orbit: 0 },
   // 오로라: 청록→보라로 물드는 몸통, 빛의 리본이 감싸 돌고, 끝의 프리즘이 무지개색으로 바뀌어요
-  { name: '오로라 낚싯대', shop: 'aurora', price: 30000, luck: 0.5, reel: 1.6, bite: 0.42, zone: 0.125, style: 'aurora',
+  { name: '오로라 낚싯대', shop: 'aurora', price: 30000, luck: 0.56, reel: 1.5, bite: 0.45, zone: 0.1, perk: '특기: 값에 비해 운이 아주 좋아요', style: 'aurora',
     color: 0x2affd0, color2: 0xb46cff, grip: 0x1a1a3a, accent: 0xe0fff8, reelC: 0x2a2a5a, rings: 6, metal: 0.4, rough: 0.15, glow: 0x7affe0, tip: 'prism', orbit: 0 },
   // 심해왕의 삼지창: 깊은 바다색 몸통에 금빛 띠, 끝에 금빛 삼지창과 푸른 보석, 물방울이 보글보글
-  { name: '심해왕의 삼지창', shop: 'aurora', price: 70000, luck: 0.58, reel: 1.72, bite: 0.37, zone: 0.14, style: 'trident',
-    color: 0x0a1a3a, color2: 0x1a4a7a, grip: 0x3a2410, accent: 0xffd04a, reelC: 0xc8a030, rings: 7, metal: 0.7, rough: 0.2, glow: 0x3ad8ff, tip: 'trident', orbit: 0 }
+  { name: '심해왕의 삼지창', shop: 'aurora', price: 70000, luck: 0.5, reel: 1.6, bite: 0.25, zone: 0.12, perk: '특기: 입질이 엄청 빨라요 (+300%)', style: 'trident',
+    color: 0x0a1a3a, color2: 0x1a4a7a, grip: 0x3a2410, accent: 0xffd04a, reelC: 0xc8a030, rings: 7, metal: 0.7, rough: 0.2, glow: 0x3ad8ff, tip: 'trident', orbit: 0 },
+  // ---- 정글섬 공방에서만 팔아요 (shop: 'jungle') — 정글 연못은 이 낚싯대로만 낚여요 ----
+  { name: '덩굴 낚싯대', shop: 'jungle', price: 1200000, luck: 0.7, reel: 1.8, bite: 0.32, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (정글 왕보다!)',
+    color: 0x3a5a22, color2: 0x6a8a3a, grip: 0x4a2a14, accent: 0xb8ff6a, reelC: 0x3a4a2a, rings: 0, metal: 0.1, rough: 0.7, glow: 0x6aff3a, tip: 'none', orbit: 4, style: 'vine' },
+  { name: '황금 신전 낚싯대', shop: 'jungle', price: 3500000, luck: 0.98, reel: 1.9, bite: 0.3, zone: 0.16, perk: '특기: 운이 제일 좋아요 (정글 왕보다!)',
+    color: 0xc89a2a, color2: 0xffd84a, grip: 0x5a3a14, accent: 0x3affb0, reelC: 0xd8b040, rings: 0, metal: 0.85, rough: 0.2, glow: 0xffc83a, tip: 'none', orbit: 6, style: 'temple' },
+  { name: '정글 왕의 낚싯대', shop: 'jungle', price: 8000000, luck: 0.86, reel: 2.4, bite: 0.2, zone: 0.2, perk: '특기: 게이지·입질이 제일 빨라요',
+    color: 0x3a2a14, color2: 0xc8862a, grip: 0x1a0a04, accent: 0xffe23a, reelC: 0x0a2a1a, rings: 0, metal: 0.3, rough: 0.4, glow: 0xffa83a, tip: 'none', orbit: 10, style: 'king' }
 ];
 RODS.forEach((r) => (r.shop = r.shop || 'base')); // 표시 없는 건 아래 상점 낚싯대
 
@@ -1173,9 +1272,14 @@ RODS.forEach((r) => (r.shop = r.shop || 'base')); // 표시 없는 건 아래 �
 //  보트 (보트 상점에서 사요) — 보트 관리인한테 E 키로 불러서 타고, 스페이스(점프)로 뛰어내려요. 보트 위에서도 낚시돼요
 // =====================================================
 const BOAT_TYPES = [
-  { name: '나무 조각배', price: 3000, speed: 4.6, desc: '삐걱삐걱 노 젓는 소박한 배' },
-  { name: '오리배', price: 8000, speed: 5.8, desc: '페달을 밟는 귀여운 노란 오리' },
-  { name: '모터보트', price: 20000, speed: 8.8, desc: '물살을 가르는 빠른 하얀 보트' }
+  // seat = 앉는 자리 높이
+  { name: '나무 조각배', price: 3000, speed: 4.6, seat: 0.38, desc: '삐걱삐걱 노 젓는 소박한 배' },
+  { name: '오리배', price: 8000, speed: 5.8, seat: 0.48, desc: '페달을 밟는 귀여운 노란 오리' },
+  { name: '모터보트', price: 20000, speed: 8.8, seat: 0.38, desc: '물살을 가르는 빠른 하얀 보트' },
+  { name: '카약', price: 5000, speed: 6.4, seat: 0.3, desc: '날렵한 주황 카약, 양쪽 노로 슝슝' },
+  { name: '돛단배', price: 15000, speed: 7.4, seat: 0.42, desc: '하얀 돛이 바람을 가득 품는 배' },
+  { name: '유람 요트', price: 45000, speed: 9.8, seat: 0.62, desc: '선실과 갑판이 있는 커다란 하얀 요트' },
+  { name: '해적선', price: 90000, speed: 9.2, seat: 0.7, desc: '검은 돛에 깃발 펄럭이는 진짜 해적선' }
 ];
 // 보트 모양: 앞이 -z 쪽 (캐릭터와 같은 방향). 물 높이에 바닥이 닿아요
 function makeBoatModel(type) {
@@ -1214,6 +1318,61 @@ function makeBoatModel(type) {
       add(0.15, 0.38, 0.9, 0xf2c030, s * 0.72, 0.4, 0.3, 0, 0, s * -0.2); // 날개
     }
     add(0.7, 0.3, 0.3, yel, 0, 0.42, 1.25, -0.5);                     // 꼬리
+  } else if (type === 3) {
+    // 카약: 길쭉하고 날렵, 가운데 구멍에 앉아요
+    const org = 0xff7a2a, dk = 0x2a2a30;
+    add(0.7, 0.22, 3.2, org, 0, 0.1, 0);
+    add(0.5, 0.18, 0.7, org, 0, 0.12, -1.8, 0.22);
+    add(0.5, 0.18, 0.7, org, 0, 0.12, 1.8, -0.22);
+    add(0.5, 0.06, 0.8, dk, 0, 0.22, 0.1);                              // 앉는 구멍
+    add(0.62, 0.05, 0.05, 0xffffff, 0, 0.22, -0.9);                     // 하얀 줄
+    const paddle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.2, 6), mat(0x3a3a40));
+    paddle.rotation.z = Math.PI / 2; paddle.position.set(0, 0.5, -0.15);
+    g.add(paddle);
+    for (const s of [-1, 1]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.16), mat(0xffd84a)); b.position.set(s * 1.1, 0.5, -0.15); g.add(b); }
+  } else if (type === 4) {
+    // 돛단배: 나무 배 + 큰 하얀 돛 + 파란 줄무늬
+    const hull = 0x9a6a42, rim = 0x6a4228;
+    add(1.3, 0.3, 3.0, hull, 0, 0.1, 0);
+    for (const s of [-1, 1]) add(0.1, 0.4, 3.0, rim, s * 0.68, 0.32, 0, 0, 0, s * -0.1);
+    add(0.9, 0.4, 0.7, hull, 0, 0.25, -1.75, 0.3);
+    add(1.2, 0.06, 2.6, 0xc8a070, 0, 0.3, 0.1);                         // 갑판
+    add(0.1, 3.0, 0.1, 0x5a3a22, 0, 1.75, -0.5);                         // 돛대
+    add(0.05, 2.4, 1.5, 0xfaf6ec, 0.06, 1.85, 0.25);                     // 큰 돛
+    add(0.06, 0.18, 1.5, 0x4a8ac8, 0.07, 1.1, 0.25);                     // 돛 줄무늬
+    add(0.06, 0.18, 1.5, 0x4a8ac8, 0.07, 1.5, 0.25);
+    add(0.05, 0.3, 0.5, 0xff5a4a, 0, 3.35, -0.3);                        // 깃발
+  } else if (type === 5) {
+    // 유람 요트: 길고 하얀 배, 선실, 파란 창문, 난간
+    const wht = 0xf6f6f2, nav = 0x1f3a6a;
+    add(1.8, 0.5, 4.2, wht, 0, 0.15, 0);
+    add(1.2, 0.5, 1.2, wht, 0, 0.2, -2.4, 0.3);
+    for (const s of [-1, 1]) add(0.04, 0.12, 4.0, nav, s * 0.91, 0.25, 0);
+    add(1.7, 0.06, 4.0, 0xc8a070, 0, 0.42, 0);                            // 나무 갑판
+    add(1.3, 0.8, 1.6, wht, 0, 0.85, -0.3);                               // 선실
+    for (const s of [-1, 1]) add(0.04, 0.3, 1.2, 0x5ab8e8, s * 0.66, 0.95, -0.3); // 창문
+    add(1.4, 0.08, 1.8, nav, 0, 1.28, -0.3);                              // 선실 지붕
+    for (const s of [-1, 1]) for (let k = 0; k < 5; k++) add(0.04, 0.35, 0.04, 0xd8d8d8, s * 0.85, 0.62, 0.6 + k * 0.32); // 난간
+    for (const s of [-1, 1]) add(0.04, 0.04, 1.4, 0xd8d8d8, s * 0.85, 0.8, 1.25);
+  } else if (type === 6) {
+    // 해적선: 검은 나무 배, 높은 뒷갑판, 검은 돛, 해골 무늬, 대포
+    const hull = 0x3a2416, rim = 0x24160c, gold = 0xd8a830;
+    add(2.0, 0.6, 4.6, hull, 0, 0.2, 0);
+    add(1.4, 0.6, 1.2, hull, 0, 0.25, -2.6, 0.35);
+    for (const s of [-1, 1]) add(0.14, 0.6, 4.6, rim, s * 1.04, 0.6, 0);
+    for (const s of [-1, 1]) add(0.03, 0.08, 4.4, gold, s * 1.12, 0.75, 0);      // 금빛 줄
+    add(1.9, 0.08, 4.4, 0x6a4a2a, 0, 0.5, 0);                                    // 갑판
+    add(1.9, 0.7, 1.2, hull, 0, 0.85, 1.8);                                       // 뒷갑판
+    add(0.16, 4.0, 0.16, rim, 0, 2.5, -0.4);                                      // 돛대
+    add(2.2, 1.8, 0.05, 0x1a1a1e, 0, 2.6, -0.3);                                  // 검은 돛
+    add(0.5, 0.45, 0.06, 0xf4f0e6, 0, 2.75, -0.26);                              // 해골
+    for (const s of [-1, 1]) add(0.1, 0.12, 0.07, 0x1a1a1e, s * 0.12, 2.8, -0.22); // 눈구멍
+    add(0.4, 0.06, 0.06, 0xf4f0e6, 0, 2.4, -0.26);                               // 뼈
+    add(0.06, 0.4, 0.6, 0xd03030, 0, 4.6, -0.1);                                  // 깃발
+    for (const s of [-1, 1]) for (const z of [-0.8, 0.4]) {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.6, 8), mat(0x2a2a2e, 0.4, { metalness: 0.6 }));
+      c.rotation.z = Math.PI / 2; c.position.set(s * 1.25, 0.7, z); g.add(c);                 // 대포
+    }
   } else {
     const wht = 0xf4f4f4, red = 0xd9534f;
     add(1.3, 0.35, 3.0, wht, 0, 0.12, 0);
@@ -1226,6 +1385,8 @@ function makeBoatModel(type) {
     add(0.35, 0.5, 0.35, 0x2a2a30, 0, 0.45, 1.6);                      // 엔진
     add(0.08, 0.5, 0.08, 0x3a3a40, 0, 0.05, 1.7);
   }
+  g.userData.dynamic = true; // 보트는 움직여요 (최적화에서 빼요)
+  g.userData.seat = BOAT_TYPES[type]?.seat ?? 0.38; // 앉는 자리 높이 (다른 플레이어 화면에서도 써요)
   return g;
 }
 const ROD_LEN = 2.6;
@@ -1357,6 +1518,110 @@ function buildRod(r, target) {
       spin.push({ mesh: b, kind: 'bubble', ph: k / 6, rad: 0.05 + (k % 2) * 0.05 });
     }
   }
+  // ---------- 정글 공방 낚싯대: 작은 블록 수백 개로 세세하게 ----------
+  if (r.style === 'vine' || r.style === 'temple' || r.style === 'king') {
+    const radAt = (y) => 0.058 - ((y + half) / ROD_LEN) * 0.036; // 그 높이의 몸통 굵기
+    const mats = new Map(); // 같은 색은 같은 재질 → 나중에 한 덩어리로 합쳐져요
+    const M = (c, rough = 0.6, extra = {}) => { const k = c + '|' + rough + '|' + JSON.stringify(extra); if (!mats.has(k)) mats.set(k, mat(c, rough, extra)); return mats.get(k); };
+    const G = (c, i = 1.2) => M(c, 0.3, { emissive: c, emissiveIntensity: i });
+    const cube = (s, c, x, y, z, m) => { const b = put(new THREE.Mesh(new THREE.BoxGeometry(s[0], s[1], s[2]), m || M(c)), x, y, z); b.castShadow = false; return b; };
+    // 몸통 둘레에 블록 한 바퀴 (n 개, 높이 y, 바깥으로 out 만큼)
+    const ring = (y, n, size, colorOf, out = 0.008, skip = () => false) => {
+      const rr = radAt(y) + out;
+      for (let k = 0; k < n; k++) {
+        if (skip(k)) continue;
+        const a = (k / n) * Math.PI * 2;
+        const b = cube([size, size * 1.3, size], 0, Math.cos(a) * rr, y, Math.sin(a) * rr, colorOf(k));
+        b.rotation.y = -a;
+      }
+    };
+    const skipSet = new Set();
+    if (r.style === 'vine') {
+      // 몸통을 나선으로 휘감는 덩굴 (블록 54개) + 잎사귀 + 작은 꽃
+      const vineA = M(0x2e6a1e), vineB = M(0x3f8a2a), leafA = M(0x5ac83a, 0.5), leafB = M(0x7ae84a, 0.5), rib = M(0x2a5a1a);
+      for (let k = 0; k < 54; k++) {
+        const t = k / 54, y = -half + 0.72 + t * (ROD_LEN - 0.86), a = t * Math.PI * 9, rr = radAt(y) + 0.012;
+        cube([0.024, 0.024, 0.024], 0, Math.cos(a) * rr, y, Math.sin(a) * rr, k % 2 ? vineA : vineB);
+        if (k % 5 === 2) { // 잎사귀: 바깥으로 비스듬히 + 가운데 잎맥
+          const lx = Math.cos(a) * (rr + 0.045), lz = Math.sin(a) * (rr + 0.045);
+          const lf = cube([0.075, 0.008, 0.036], 0, lx, y + 0.012, lz, k % 10 === 2 ? leafA : leafB); lf.rotation.set(0, -a, 0.5);
+          const rb = cube([0.07, 0.01, 0.006], 0, lx, y + 0.016, lz, rib); rb.rotation.set(0, -a, 0.5);
+        }
+        if (k % 13 === 7) { // 분홍·노란 꽃 (꽃잎 5개 + 가운데)
+          const fx = Math.cos(a) * (rr + 0.02), fz = Math.sin(a) * (rr + 0.02), pc = k % 26 === 7 ? M(0xff7ab8, 0.4) : M(0xffe066, 0.4);
+          for (let p = 0; p < 5; p++) { const pa = p * 1.2566; cube([0.016, 0.016, 0.016], 0, fx + Math.cos(pa) * 0.018, y + Math.sin(pa) * 0.018, fz, pc); }
+          cube([0.012, 0.012, 0.012], 0, fx, y, fz + 0.004, M(0xfff6c0, 0.3));
+        }
+      }
+      // 나무껍질 손잡이 (작은 껍질 조각 4줄 x 9개)
+      for (let row = 0; row < 4; row++) ring(-half + 0.1 + row * 0.13, 9, 0.032, (k) => M([0x5a3a1e, 0x6a4a28, 0x4a2e16][(k + row) % 3], 0.95), 0.07, (k) => (k + row) % 4 === 3);
+      // 잎으로 덮인 릴
+      for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; const lf = cube([0.06, 0.008, 0.04], 0, 0.14 + Math.cos(a) * 0.02, -half + 0.85 + Math.sin(a) * 0.08, 0.06, k % 2 ? leafA : leafB); lf.rotation.set(Math.PI / 2, 0, a); }
+      // 끝: 돋아나는 새싹 (잎 3장 + 빛나는 씨앗)
+      for (let k = 0; k < 3; k++) { const a = k * 2.094; const lf = cube([0.09, 0.01, 0.04], 0, Math.cos(a) * 0.04, half + 0.05, Math.sin(a) * 0.04, leafB); lf.rotation.set(0, -a, 0.7); }
+      const seed = put(new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), glowMat(0x9aff5a, 1.6)), 0, half + 0.1, 0);
+      spin.push({ mesh: seed, kind: 'pulse', base: 1 }); skipSet.add(seed);
+      // 끝 근처에서 늘어진 덩굴손 3가닥 (블록이 동글게 말려요)
+      for (let s = 0; s < 3; s++) { const a0 = s * 2.1; for (let k = 0; k < 7; k++) { const a = a0 + k * 0.5, rr = 0.03 + k * 0.006; cube([0.014, 0.014, 0.014], 0, Math.cos(a) * rr, half - 0.12 - k * 0.022, Math.sin(a) * rr, vineB); } }
+    }
+    if (r.style === 'temple') {
+      const gold = M(0xffd04a, 0.25, { metalness: 0.85 }), goldD = M(0xb8902a, 0.3, { metalness: 0.8 }), jade = G(0x3affb0, 0.9), stone = M(0x8a8a6a, 0.8);
+      // 옥 상형문자 띠 6줄 (블록 사이사이를 비워서 무늬처럼)
+      for (let b = 0; b < 6; b++) {
+        const y = -half + 0.95 + b * 0.27;
+        ring(y - 0.03, 10, 0.02, () => goldD, 0.004);
+        ring(y, 10, 0.018, (k) => (k + b) % 3 ? jade : gold, 0.006, (k) => (k * 7 + b) % 5 === 0);
+        ring(y + 0.03, 10, 0.02, () => goldD, 0.004);
+      }
+      // 손잡이 끝: 3층 계단식 피라미드
+      for (let k = 0; k < 3; k++) cube([0.16 - k * 0.045, 0.035, 0.16 - k * 0.045], 0, 0, -half - 0.02 + k * 0.035, 0, k % 2 ? goldD : stone);
+      cube([0.03, 0.03, 0.03], 0, 0, -half + 0.09, 0, jade);
+      // 손잡이: 금줄 감기 (작은 블록 4줄)
+      for (let row = 0; row < 4; row++) ring(-half + 0.12 + row * 0.12, 8, 0.03, (k) => (k + row) % 2 ? gold : goldD, 0.07);
+      // 태양 원반 릴: 금 원반 + 햇살 8개 + 옥 가운데
+      const disk = put(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 12), gold), 0.17, -half + 0.85, 0); disk.rotation.z = Math.PI / 2; disk.castShadow = false;
+      for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; const ray = cube([0.012, 0.05, 0.02], 0, 0.19, -half + 0.85 + Math.cos(a) * 0.13, Math.sin(a) * 0.13, gold); ray.rotation.x = a; }
+      cube([0.02, 0.04, 0.04], 0, 0.19, -half + 0.85, 0, jade);
+      // 끝: 황금 신상 얼굴 + 깃털 머리장식
+      const hy = half + 0.11;
+      cube([0.11, 0.12, 0.09], 0, 0, hy, 0, gold);                                // 얼굴
+      for (const s of [-1, 1]) cube([0.022, 0.016, 0.01], 0, s * 0.025, hy + 0.015, 0.048, jade); // 빛나는 눈
+      cube([0.04, 0.01, 0.01], 0, 0, hy - 0.03, 0.048, goldD);                      // 입
+      cube([0.016, 0.03, 0.012], 0, 0, hy - 0.005, 0.05, goldD);                    // 코
+      for (const s of [-1, 1]) cube([0.02, 0.05, 0.03], 0, s * 0.065, hy - 0.01, 0, goldD); // 귀걸이 판
+      cube([0.13, 0.025, 0.1], 0, 0, hy + 0.072, 0, goldD);                         // 머리띠
+      const featherC = [0x2ab84a, 0xd83a2a, 0x2a8ad8, 0xffd83a, 0x2ab84a, 0xd83a2a, 0x2a8ad8];
+      for (let k = 0; k < 7; k++) { const a = (k - 3) * 0.32; const fe = cube([0.022, 0.13, 0.008], 0, Math.sin(a) * 0.07, hy + 0.14 + Math.cos(a) * 0.02, -0.02, M(featherC[k], 0.5)); fe.rotation.z = -a; }
+    }
+    if (r.style === 'king') {
+      const black = M(0x14100c, 0.6), orange = M(0xe89a2a, 0.5), gold = M(0xffd04a, 0.25, { metalness: 0.85 }), emer = G(0x2aff9a, 1.3), rune = G(0x6affb0, 1.6);
+      // 재규어 무늬: 점무늬 꽃송이 (가운데 주황 + 둘레 검정 블록)
+      for (let k = 0; k < 16; k++) {
+        const y = -half + 0.8 + (k / 16) * (ROD_LEN - 1.0), a = k * 2.4, rr = radAt(y) + 0.006;
+        const cx = Math.cos(a) * rr, cz = Math.sin(a) * rr;
+        cube([0.016, 0.016, 0.016], 0, cx, y, cz, orange);
+        for (let p = 0; p < 4; p++) { const pa = p * 1.57 + 0.4; cube([0.012, 0.012, 0.012], 0, cx + Math.cos(a + Math.PI / 2) * Math.cos(pa) * 0.018, y + Math.sin(pa) * 0.018, cz + Math.sin(a + Math.PI / 2) * Math.cos(pa) * 0.018, black); }
+      }
+      // 빛나는 룬 나선
+      for (let k = 0; k < 30; k++) { const t = k / 30, y = -half + 0.75 + t * (ROD_LEN - 0.9), a = -t * Math.PI * 6, rr = radAt(y) + 0.014; cube([0.012, 0.03, 0.012], 0, Math.cos(a) * rr, y, Math.sin(a) * rr, rune); }
+      // 금 고리 5개
+      for (let k = 0; k < 5; k++) ring(-half + 0.9 + k * 0.38, 12, 0.016, () => gold, 0.004);
+      // 손잡이 아래: 마코앵무새 깃털 5장 (마디마디 색이 바뀌어요)
+      const feather = [[0xd83a2a, 0xffd83a], [0x2a8ad8, 0x2ab84a], [0x2ab84a, 0xffd83a], [0xd83a2a, 0x2a8ad8], [0xffd83a, 0xd83a2a]];
+      for (let f = 0; f < 5; f++) { const a = (f - 2) * 0.35; for (let k = 0; k < 6; k++) { const fe = cube([0.03 - k * 0.003, 0.03, 0.01], 0, 0.08 + Math.sin(a) * 0.03 * k, -half + 0.3 - k * 0.028, Math.cos(a) * 0.01 * k - 0.02, M(feather[f][k % 2], 0.5)); fe.rotation.z = -0.5 + a; } }
+      // 에메랄드 릴
+      for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; const em = put(new THREE.Mesh(new THREE.OctahedronGeometry(0.03, 0), emer), 0.16, -half + 0.85 + Math.cos(a) * 0.06, Math.sin(a) * 0.06); em.castShadow = false; }
+      // 끝: 금 왕관 (뾰족 5개 + 에메랄드) + 위에 떠서 도는 큰 에메랄드
+      for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; cube([0.03, 0.03, 0.03], 0, Math.cos(a) * 0.06, half + 0.02, Math.sin(a) * 0.06, gold); }
+      for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2; cube([0.02, 0.07, 0.02], 0, Math.cos(a) * 0.06, half + 0.07, Math.sin(a) * 0.06, gold); const e = put(new THREE.Mesh(new THREE.OctahedronGeometry(0.018, 0), emer), Math.cos(a) * 0.06, half + 0.115, Math.sin(a) * 0.06); e.castShadow = false; }
+      const big = put(new THREE.Mesh(new THREE.OctahedronGeometry(0.06, 0), glowMat(0x2aff9a, 1.8)), 0, half + 0.2, 0);
+      big.scale.y = 1.5;
+      spin.push({ mesh: big, kind: 'self' }); skipSet.add(big);
+    }
+    // 같은 재질 블록끼리 한 덩어리로 (움직이는 조각은 빼고) → 블록이 많아도 가벼워요
+    for (const s of spin) skipSet.add(s.mesh);
+    compactRig(THREE, target, skipSet);
+  }
   // 끝 주변을 빙글빙글 도는 작은 조각들
   for (let k = 0; k < (r.orbit || 0); k++) {
     const s = put(new THREE.Mesh(new THREE.OctahedronGeometry(r.tip === 'star' ? 0.025 : 0.035, 0), glowMat(k % 2 ? r.accent : r.glow, 1.5)), 0, half, 0);
@@ -1392,6 +1657,7 @@ rod.visible = false; // 처음엔 빈손 (1번 키로 꺼내요)
 hero.armR.add(rod);
 let rodSpin = [];
 const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
 const rodTipWorld = (out = new THREE.Vector3()) => rod.localToWorld(out.set(0, ROD_LEN / 2, 0));
 
 const cordMat = new THREE.LineBasicMaterial({ color: 0xf1e0c4, transparent: true, opacity: 0.88 });
@@ -1400,6 +1666,7 @@ scene.add(fishingLine);
 
 function makeBobber(s = 1) {
   const b = new THREE.Group();
+  b.userData.dynamic = true; // 찌는 움직이고 숨었다 나타나요
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.16 * s, 16, 12), mat(0xf3eee0, 0.4));
   top.position.y = 0.03 * s;
   const red = new THREE.Mesh(new THREE.SphereGeometry(0.13 * s, 16, 12), mat(0xe67557, 0.42, { emissive: 0xa33d27, emissiveIntensity: 0.18 }));
@@ -1532,7 +1799,11 @@ function updateNPCs(now, dt, t) {
       n.rod.localToWorld(tmpV.set(0, 1.2, 0));
       b.position.lerpVectors(n.home, tmpV, Math.min(1, k * 1.3));
       b.position.y += Math.sin(k * Math.PI) * 1.2;
-      if (now > n.until) { n.state = 'rest'; n.until = now + 2500; n.count++; n.tag.draw(n.name, n.count); } // 한 마리 잡았어요
+      if (now > n.until) { // 한 마리 잡았어요 → 들어서 보여 줘요
+        n.state = 'rest'; n.until = now + 2800; n.count++; n.tag.draw(n.name, n.count);
+        if (n.pop) endCatchShow(n.pop);
+        n.pop = startCatchShow(glitchify(rollFish(0.08, 'lake', isRaining())), b.position, now, 2800);
+      }
     } else if (n.state === 'rest') {
       target = 1.5;
       b.visible = false;
@@ -1540,6 +1811,7 @@ function updateNPCs(now, dt, t) {
     }
     n.arm += (target - n.arm) * Math.min(1, dt * 10);
     n.armL.rotation.x = n.armR.rotation.x = n.arm;
+    if (n.pop && !updateCatchShow(n.pop, now, t, n.group.position, n.group.rotation.y, 1.0)) n.pop = null;
     // 말을 걸면 낚시하면서 고개만 살짝 돌려서 나를 봐요
     const look = n.talkUntil > now ? headToward(n.group, 0.7) : Math.sin(t * 0.5 + n.seed) * 0.15;
     n.head.rotation.y += (look - n.head.rotation.y) * Math.min(1, dt * 8);
@@ -1566,7 +1838,7 @@ function makeSign(text) {
   x.strokeStyle = '#c9a25a';
   x.lineWidth = 8;
   x.strokeRect(6, 6, 500, 116);
-  x.font = '900 62px "Malgun Gothic", sans-serif';
+  x.font = '62px "Jua", "Malgun Gothic", sans-serif';
   x.textAlign = 'center';
   x.textBaseline = 'middle';
   x.fillStyle = '#ffd98a';
@@ -1681,8 +1953,9 @@ const shopBoats = [];
   g.add(keeper.group);
   BOAT_TYPES.forEach((b, i) => {
     const m = makeBoatModel(i);
-    m.position.set(12.2 + i * 3.3, LAKE.y, -3.4 - (i === 1 ? 0.4 : 0));
-    m.rotation.y = 0.25 - i * 0.25;
+    // 처음 3척은 가게 앞 첫 줄, 새로 생긴 4척은 그 뒤 둘째 줄에 떠 있어요
+    if (i < 3) { m.position.set(12.2 + i * 3.3, LAKE.y, -3.4 - (i === 1 ? 0.4 : 0)); m.rotation.y = 0.25 - i * 0.25; }
+    else { m.position.set(8.4 + (i - 3) * 4.2, LAKE.y, -9.2 - ((i - 3) % 2) * 0.6); m.rotation.y = 0.3 - (i - 3) * 0.2; }
     scene.add(m);
     shopBoats.push({ m, ph: i * 1.7 });
   });
@@ -1691,18 +1964,21 @@ const shopBoats = [];
 //  x, z = 관리인이 서 있는 곳, wx, wz = 보트를 띄워 주는 물 위 자리
 const BOAT_CALLERS = [
   { x: 8.0, z: 2.5, wx: 8.0, wz: -2.8 },     // 보트 상점 옆
-  { x: 3.2, z: -31.2, wx: 3.2, wz: -26.0 }   // 호수 건너편 (북쪽 물가)
+  { x: 3.2, z: -31.2, wx: 3.2, wz: -26.0 },  // 호수 건너편 (북쪽 물가)
+  { x: -13.2, z: 22.6, wx: -10, wz: 41.5 }    // 바다 모래사장 (부두 끝 바다에 띄워 줘요)
 ];
-for (const c of BOAT_CALLERS) {
+// 보트 관리인 한 명 세우기 (호숫가·모래사장·섬마다)
+function makeBoatCaller(c) {
+  const gy = c.y ?? groundY(c.x, c.z); // 섬은 높이를 직접 알려 줘요 (섬 높이 값이 아직 안 정해졌을 때)
   const ry = Math.atan2(c.x - c.wx, c.z - c.wz); // 물 쪽을 바라봐요 (사람 앞은 -z)
   const man = makeBlockPerson({ skin: 0xd8a070, shirt: 0x2a4a6a, vest: 0xf2c14e, vestPocket: 0xc89a2a, pants: 0x3a3a40, boots: 0x2a2a30, hair: 'short', hairColor: 0x5a3a22, hat: 'cap', hatColor: 0xff6a3a });
-  man.group.position.set(c.x, groundY(c.x, c.z), c.z);
+  man.group.position.set(c.x, gy, c.z);
   man.group.rotation.y = ry;
   scene.add(man.group);
   // 옆에 작은 말뚝 + 구명튜브 (보트 부르는 곳 표시)
   const side = new THREE.Vector3(Math.cos(ry), 0, -Math.sin(ry)); // 관리인 오른쪽
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.3, 0.18), darkWood);
-  post.position.set(c.x + side.x * 0.9, groundY(c.x, c.z) + 0.65, c.z + side.z * 0.9);
+  post.position.set(c.x + side.x * 0.9, gy + 0.65, c.z + side.z * 0.9);
   post.castShadow = true;
   scene.add(post);
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.08, 8, 16), mat(0xff6a3a));
@@ -1710,9 +1986,10 @@ for (const c of BOAT_CALLERS) {
   ring.rotation.y = ry;
   scene.add(ring);
   addCollider(c.x, c.z, 0.5);
-  const base = new THREE.Vector3(c.x, groundY(c.x, c.z), c.z);
+  const base = new THREE.Vector3(c.x, gy, c.z);
   shops.push({ kind: 'boatcall', title: '보트 소환 · 보트 관리인', group: man.group, caller: c, pos: base.clone(), promptAt: base.clone().add(new THREE.Vector3(0, 3.1, 0)) });
 }
+BOAT_CALLERS.forEach(makeBoatCaller);
 // 오로라 강 낚싯대 공방: 가게 앞 받침대 위에서 새 낚싯대 3종이 빙글빙글 돌며 전시돼요
 const displayRods = [];
 {
@@ -1842,7 +2119,122 @@ const WALKER_LINES = [
    '밤에 오로라 강에 가 봐요. 하늘이랑 물이 같이 일렁여요.']
 ];
 const WALKER_START = [[-3, 11], [3.5, 12], [-10, 11], [12.5, 9], [-30, 4], [-38, -12]];
+// 바다 세계: 모래사장 · 부두 · 등대 · 섬 · 큰 집 · 맵 곳곳 장식 (seaworld.js) — 가게·나무가 다 놓인 다음에 만들어서 겹치지 않게
+const seaWorld = buildSeaWorld({ THREE, scene, SEA, SEA_PIER, JUNGLE, JUNGLE_POND, islands, addCollider, colliders, inLake, onPlateau, onDock, shops, makeLantern, LANTERN_MATS, BOUNDS: { x0: -74, x1: 44, z0: -48, z1: 24 } });
+// 정글 판매점: 정글섬에서 잡은 비싼 물고기를 바로 팔 수 있어요
+{
+  const { part } = makeShop('sell', '정글 판매점', JUNGLE.x + 9, JUNGLE.z - 13, JUNGLE.x, JUNGLE.z - 27, 0x7a6a42, 0x2a6a3a, 0.17);
+  for (let i = 0; i < 5; i++) part(0.07, 0.8 + (i % 2) * 0.4, 0.07, mat(0x3a8a2a), -1.5 + i * 0.75, 1.95 - (i % 2) * 0.2, 1.36); // 덩굴
+  part(0.7, 0.35, 0.5, mat(0xc8a060), -1.1, 1.38, 0.95);  // 계산대 위 물고기 상자
+  part(0.4, 0.12, 0.2, mat(0x5ab8e8, 0.4), -1.1, 1.6, 0.95);
+}
+// 정글 공방: 정글섬 선착장 옆. 정글 연못 전용 낚싯대(최소 $1,000,000)를 팔아요
+{
+  const { g, part } = makeShop('rod4', '정글 공방', JUNGLE.x - 11, JUNGLE.z - 12, JUNGLE.x, JUNGLE.z - 27, 0x6a5a3a, 0x3a6a2a, 0.17);
+  // 가게 벽에 덩굴과 큰 잎사귀
+  for (let i = 0; i < 6; i++) part(0.08, 0.9 + (i % 3) * 0.3, 0.08, mat(0x3a8a2a), -1.6 + i * 0.64, 1.9 - (i % 3) * 0.15, 1.36);
+  part(1.1, 0.06, 0.5, mat(0x4aa83a), -1.2, 2.55, 1.45);
+  part(1.1, 0.06, 0.5, mat(0x3a9a2a), 1.2, 2.55, 1.45);
+  // 가게 앞 이끼 낀 돌 받침대 3개 위에서 정글 낚싯대가 빙글빙글 (실물 구경)
+  const ry = g.rotation.y, fx = Math.sin(ry), fz = Math.cos(ry), rx = Math.cos(ry), rz = -Math.sin(ry);
+  const pedM = mat(0x7a8a6a, 0.85), mossM = mat(0x4a8a3a, 0.9), ringM = mat(0x8aff6a, 0.3, { emissive: 0x4aff3a, emissiveIntensity: 1.2 });
+  const sx = JUNGLE.x - 11, sz = JUNGLE.z - 12, base = 0.25 + 0.72;
+  RODS.filter((r) => r.shop === 'jungle').forEach((r, i) => {
+    const off = (i - 1) * 2.2;
+    const px = sx + fx * 3.6 + rx * off, pz = sz + fz * 3.6 + rz * off;
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.8, 8), pedM);
+    ped.position.set(px, 0.25 + 0.32, pz);
+    ped.castShadow = ped.receiveShadow = true;
+    const moss = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.06, 8), mossM);
+    moss.position.set(px, 0.25 + 0.74, pz);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.03, 6, 24), ringM);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(px, 0.25 + 0.78, pz);
+    scene.add(ped, moss, ring);
+    const holder = new THREE.Group();
+    holder.position.set(px, base + ROD_LEN / 2 * 1.05, pz);
+    const rg = new THREE.Group();
+    rg.scale.setScalar(1.05);
+    holder.add(rg);
+    const sp = buildRod(r, rg);
+    holder.userData.dynamic = true;
+    scene.add(holder);
+    displayRods.push({ holder, sp, ph: i * 2, base });
+    const tag = makeSign(r.name.replace(' 낚싯대', ''));
+    tag.scale.setScalar(0.42);
+    tag.position.set(px + fx * 0.52, 0.25 + 0.55, pz + fz * 0.52);
+    tag.rotation.y = ry;
+    scene.add(tag);
+    addCollider(px, pz, 0.55);
+  });
+}
+// 섬·모래사장 물건: 앞에 서서 E
+for (const t of seaWorld.things) {
+  const d = t.type === 'hammock' ? 1.2 : 1.3, ry = t.ry || 0;
+  const px = t.x - Math.sin(ry) * d, pz = t.z - Math.cos(ry) * d, y = t.y ?? -0.08;
+  shops.push({ kind: 'thing', thing: t, title: t.title, group: new THREE.Group(), pos: new THREE.Vector3(px, y, pz), promptAt: new THREE.Vector3(t.x, y + 2.6, t.z) });
+}
+// 섬마다 선착장 옆에 보트 관리인 (섬에서도 배를 불러 다른 섬이나 본토로 갈 수 있어요)
+seaWorld.islands.forEach((it) => makeBoatCaller({ x: it.x + 2.4, z: it.z - it.r * 0.84, y: 0.25, wx: it.x, wz: it.z - it.r * 0.95 - 7.5 }));
 const walkers = [];
+
+// =====================================================
+//  NPC 가 잡은 물고기 보여 주기: 찌에서 튀어 올라 → 머리 위에서 들고 자랑(이름표) → 사라져요
+// =====================================================
+function startCatchShow(fish, from, now, holdMs) {
+  const f = findFish(fish.name);
+  if (!f) return null;
+  const model = makeFishModel(f, fish.mut, fish.weight);
+  const sc = fishScale(f, fish.weight);
+  if (sc > 1.8) model.scale.multiplyScalar(1.8 / sc); // 너무 큰 물고기는 줄여서
+  scene.add(model);
+  // 이름표: 이로치(색깔) + 이름 + 무게
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 120;
+  const x = c.getContext('2d');
+  x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 10; x.strokeStyle = 'rgba(0,0,0,0.85)';
+  x.font = '52px "Jua", "Malgun Gothic", sans-serif';
+  const muts = mutList(fish.mut);
+  const parts = [...muts.map((m) => [m.name, m.color]), [`${fish.name} ${fmtKg(fish.weight)}`, RARITY[f.rarity].color]];
+  const widths = parts.map(([t]) => x.measureText(t + ' ').width);
+  let cx = 320 - widths.reduce((a, b) => a + b, 0) / 2;
+  parts.forEach(([t, col], i) => { const mid = cx + widths[i] / 2; x.strokeText(t, mid, 60); x.fillStyle = col; x.fillText(t, mid, 60); cx += widths[i]; });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+  tag.scale.set(2.4, 0.45, 1);
+  tag.renderOrder = 11;
+  tag.userData.dynamic = true;
+  scene.add(tag);
+  return { model, tag, start: now, from: from.clone(), until: now + holdMs, flop: f.name === '물 만난 광어' };
+}
+function endCatchShow(sh) {
+  if (!sh) return;
+  scene.remove(sh.model); scene.remove(sh.tag);
+  sh.tag.material.map.dispose(); sh.tag.material.dispose();
+}
+// 매 프레임: false 를 돌려주면 끝났어요
+function updateCatchShow(sh, now, t, pos, ry, headY) {
+  if (!sh) return false;
+  if (now > sh.until) { endCatchShow(sh); return false; }
+  const q = (now - sh.start) / 700; // 0~1: 날아오는 중
+  const hold = tmpV2.set(pos.x - Math.sin(ry) * 0.55, pos.y + headY + 1.1, pos.z - Math.cos(ry) * 0.55);
+  if (q < 1) {
+    sh.model.position.lerpVectors(sh.from, hold, q);
+    sh.model.position.y += Math.sin(q * Math.PI) * 1.4;
+    sh.model.rotation.set(0, ry + Math.PI / 2, Math.sin(t * 22) * 0.45);
+  } else {
+    sh.model.position.copy(hold);
+    sh.model.position.y += Math.sin(t * 3) * 0.05;
+    sh.model.rotation.set(0, ry + Math.PI / 2, Math.sin(t * 9) * 0.12);
+    if (sh.flop) { sh.model.rotation.z = Math.sin(t * 17) * 0.85; sh.model.position.y += Math.max(0, Math.sin(t * 8.5)) * 0.35; }
+  }
+  const left = sh.until - now;
+  if (left < 300) sh.model.scale.multiplyScalar(0.85); // 사라질 땐 쏙
+  sh.tag.visible = q >= 1;
+  sh.tag.position.set(hold.x, hold.y + 0.9, hold.z);
+  return true;
+}
 
 // 이름표: 위에 이름, 아래에 잡은 수
 function makeNameTag() {
@@ -1861,9 +2253,9 @@ function makeNameTag() {
     x.textBaseline = 'middle';
     x.lineWidth = 10;
     x.strokeStyle = 'rgba(0,0,0,0.8)';
-    x.font = '800 54px "Malgun Gothic", sans-serif';
+    x.font = '54px "Jua", "Malgun Gothic", sans-serif';
     x.strokeText(name, 256, 50); x.fillStyle = '#e8f0ff'; x.fillText(name, 256, 50);
-    x.font = '900 80px "Malgun Gothic", sans-serif';
+    x.font = '80px "Jua", "Malgun Gothic", sans-serif';
     const num = Number(n).toLocaleString('en-US'); // 99,812 처럼 쉼표
     x.strokeText(num, 256, 135); x.fillStyle = '#ffffff'; x.fillText(num, 256, 135);
     tex.needsUpdate = true;
@@ -2000,6 +2392,26 @@ function castTargetFrom(x, z, ry) {
   return null;
 }
 
+// 갇힌 NPC 빼 주기: 가까운 곳부터 빙 둘러보며 "물 밖 + 아무것도 안 걸리는 땅"을 찾아 옮겨요
+//  (연못 물속에서 길을 잃었거나, 계단 옆 틈에 끼었을 때). 그래도 계속 안 되면 처음 자리로 돌아가요
+function unstickWalker(w) {
+  const p = w.group.position;
+  w.rescues = (w.rescues || 0) + 1;
+  if (w.rescues > 4) { // 너무 자주 끼면 처음 자리로
+    const st = WALKER_START[walkers.indexOf(w)] || [0, 10];
+    p.set(st[0], -0.08, st[1]);
+    w.rescues = 0; w.failCount = 0; w.stuckCount = 0; w.path = [];
+    return;
+  }
+  for (let r = 0.6; r <= 4.2; r += 0.4) for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+    if (!walkable(x, z, undefined, undefined, true) || inLake(x, z) || onStairs(x, z)) continue;
+    if (Math.abs(groundY(x, z) - p.y) > 1.2) continue; // 언덕 위↔아래로 순간이동하지 않게
+    p.set(x, groundY(x, z), z);
+    w.failCount = 0; w.stuckCount = 0; w.path = [];
+    return;
+  }
+}
 function walkerThink(w, now) {
   w.rodG.visible = false;
   let spot = null;
@@ -2011,10 +2423,21 @@ function walkerThink(w, now) {
     const r = Math.random();
     if (w.veteran && r < 0.5) w.job = 'aurora';
     else w.job = r < 0.55 ? 'lake' : r < 0.75 ? 'dock' : 'pond';
-    spot = w.job === 'lake' ? lakeSpot() : w.job === 'dock' ? dockSpot() : w.job === 'aurora' ? auroraSpot() : pondSpot();
+    // 다른 사람이 이미 서 있거나 가려는 자리 근처는 피해요 (여러 번 다시 골라 봐요)
+    const pick = () => (w.job === 'lake' ? lakeSpot() : w.job === 'dock' ? dockSpot() : w.job === 'aurora' ? auroraSpot() : pondSpot());
+    for (let k = 0; k < 8; k++) {
+      spot = pick();
+      if (spot && !spotTaken(w, spot.x, spot.z)) break;
+    }
   }
   const path = spot && planPath(w.group.position, spot);
-  if (!path) { w.until = now + 400; return; } // 길이 없으면 잠깐 있다가 다시 골라요
+  if (!path) { // 길이 없으면 잠깐 있다가 다시 골라요. 여러 번 실패하면 끼어 있는 거라 빼 줘요
+    w.until = now + 400;
+    w.failCount = (w.failCount || 0) + 1;
+    if (w.failCount >= 3) unstickWalker(w);
+    return;
+  }
+  w.failCount = 0;
   w.spot = spot;
   w.path = path;
   w.state = 'walk';
@@ -2022,7 +2445,49 @@ function walkerThink(w, now) {
   w.stuckPos.copy(w.group.position);
 }
 
+// 그 자리 근처(1.6칸)에 다른 사람이 서 있거나 가는 중이면 true
+function spotTaken(me, x, z) {
+  for (const o of walkers) {
+    if (o === me) continue;
+    const oz = o.state === 'walk' || o.state === 'arrive' ? o.spot : null;
+    if (oz && (oz.x - x) ** 2 + (oz.z - z) ** 2 < 1.6 * 1.6) return true;
+    const g = o.group.position;
+    if ((g.x - x) ** 2 + (g.z - z) ** 2 < 1.6 * 1.6) return true;
+  }
+  return false;
+}
+// 사람끼리 몸이 겹치면 살짝 밀어내요 (계단·길에서 엇갈릴 때도 겹치지 않게)
+const WALKER_GAP = 0.95;
+function separateWalkers(dt, now) {
+  for (let i = 0; i < walkers.length; i++) for (let j = i + 1; j < walkers.length; j++) {
+    const a = walkers[i].group.position, b = walkers[j].group.position;
+    if (Math.abs(a.y - b.y) > 1.2) continue;
+    let dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d >= WALKER_GAP) continue;
+    if (d < 0.001) { dx = 1; dz = 0; d = 1; } // 완전히 같은 자리면 아무 쪽으로나
+    const wa = walkers[i], wb = walkers[j];
+    if (now < wa.ghostUntil || now < wb.ghostUntil) continue; // 끼어서 못 가던 사람은 잠깐 그냥 지나가요
+    // 미는 힘은 걷는 속도(초당 3.2칸)보다 약하게 → 서로 밀다가 둘 다 갇히는 일이 없어요
+    const push = Math.min((WALKER_GAP - d) / 2, 1.6 * dt);
+    const ux = dx / d, uz = dz / d;
+    // 걷는 사람은 "자기 오른쪽"으로 비켜요 (마주 오면 둘 다 오른쪽으로 → 스쳐 지나가요)
+    // 낚시하며 서 있는 사람은 그대로 두고, 걷는 사람만 비켜요
+    const aWalk = wa.state === 'walk', bWalk = wb.state === 'walk';
+    const side = (w, sx, sz) => {
+      const rx = Math.cos(w.ry), rz = -Math.sin(w.ry); // 오른쪽 방향
+      return [rx * 0.7 + sx * 0.3, rz * 0.7 + sz * 0.3];
+    };
+    const [pax, paz] = aWalk ? side(wa, -ux, -uz) : [-ux, -uz];
+    const [pbx, pbz] = bWalk ? side(wb, ux, uz) : [ux, uz];
+    const ka = aWalk || !bWalk ? 1 : 0, kb = bWalk || !aWalk ? 1 : 0;
+    const ax = a.x + pax * push * ka, az = a.z + paz * push * ka;
+    const bx = b.x + pbx * push * kb, bz = b.z + pbz * push * kb;
+    if (ka && walkable(ax, az, a.x, a.z, true)) { a.x = ax; a.z = az; }
+    if (kb && walkable(bx, bz, b.x, b.z, true)) { b.x = bx; b.z = bz; }
+  }
+}
 function updateWalkers(now, dt, t) {
+  separateWalkers(dt, now);
   for (const w of walkers) {
     const p = w.group.position;
     let moving = false;
@@ -2065,12 +2530,17 @@ function updateWalkers(now, dt, t) {
         }
         // 1초 동안 거의 못 움직였으면 다른 곳으로
         if (now - w.stuckAt > 1000) {
-          if (p.distanceTo(w.stuckPos) < 0.3) { w.state = 'think'; w.until = now + 300; }
+          if (p.distanceTo(w.stuckPos) < 0.3) { // 끼었어요: 잠깐 서로 통과 + 두 번째부터는 걸을 수 있는 땅으로 빼 줘요
+            w.state = 'think'; w.until = now + 300; w.ghostUntil = now + 2500;
+            w.stuckCount = (w.stuckCount || 0) + 1;
+            if (w.stuckCount >= 2) unstickWalker(w);
+          } else w.stuckCount = 0;
           w.stuckAt = now;
           w.stuckPos.copy(p);
         }
       }
     } else if (w.state === 'arrive') {
+      w.rescues = 0; // 잘 도착했으니 '갇힘 횟수'는 처음부터
       let diff = w.spot.face - w.ry;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       w.ry += diff * Math.min(1, dt * 8);
@@ -2120,17 +2590,12 @@ function updateWalkers(now, dt, t) {
         w.bobber.visible = false;
         if (Math.random() < 0.8) {
           // 잡았다! 물고기가 머리 위로 튀어 올라요
-          const fish = rollFish(w.rod.luck, w.zone || 'lake', isRaining());
-          const f = findFish(fish.name);
-          const model = makeFishModel(f, fish.mut, fish.weight);
-          const sc = fishScale(f, fish.weight);
-          if (sc > 2.2) model.scale.multiplyScalar(2.2 / sc);
-          scene.add(model);
-          if (w.pop) scene.remove(w.pop.model);
-          w.pop = { model, start: now, from: w.bobber.position.clone() };
+          const fish = glitchify(rollFish(w.rod.luck, w.zone || 'lake', isRaining()));
+          if (w.pop) endCatchShow(w.pop);
+          w.pop = startCatchShow(fish, w.bobber.position, now, 2600); // 잡은 물고기를 들어서 보여 줘요
           w.count++; w.bag++;
           w.tag.draw(w.name, w.count);
-          w.state = 'caught'; w.until = now + 1500;
+          w.state = 'caught'; w.until = now + 2600;
         } else { w.state = 'pause'; w.until = now + 1200; }
       }
     } else if (w.state === 'caught') {
@@ -2144,18 +2609,8 @@ function updateWalkers(now, dt, t) {
       }
     }
 
-    // 잡은 물고기 튀어 오르기 → 사라지기
-    if (w.pop) {
-      const q = (now - w.pop.start) / 1000;
-      if (q > 1.5) { scene.remove(w.pop.model); w.pop = null; }
-      else {
-        tmpV.set(p.x, p.y + 3.2, p.z);
-        w.pop.model.position.lerpVectors(w.pop.from, tmpV, Math.min(1, q));
-        w.pop.model.position.y += Math.sin(Math.min(1, q) * Math.PI) * 1.2;
-        w.pop.model.rotation.y = w.ry + Math.PI / 2;
-        w.pop.model.rotation.z = Math.sin(t * 20) * 0.3;
-      }
-    }
+    // 잡은 물고기: 튀어 올라서 → 손에 들고 자랑 → 사라지기
+    if (w.pop && !updateCatchShow(w.pop, now, t, p, w.ry, 1.2)) w.pop = null;
 
     // 몸 움직임 (주인공과 같은 방식)
     w.group.rotation.y = w.ry;
@@ -2195,7 +2650,9 @@ function updateWalkers(now, dt, t) {
 //  저장 (브라우저에 기록)
 // =====================================================
 const SAVE_KEY = 'lakeFishing_v2';
-const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1 };
+// 살 수 있는 집 (seaworld.js 의 집 id 와 같아요). slots = 어항 칸 수
+const HOUSE_INFO = { sunset: { slots: 8 }, coral: { slots: 12 }, pine: { slots: 14 }, star: { slots: 18 }, whale: { slots: 26 } };
+const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {} };
 
 // 저장된 기록은 누구나 개발자 도구로 고칠 수 있어서 그대로 믿으면 안 돼요.
 // 불러올 때 하나하나 검사해서, 이상한 값은 버리거나 안전한 값으로 바꿔요.
@@ -2213,24 +2670,35 @@ function cleanSave(s) {
   out.owned = [...owned].sort((a, b) => a - b);
   const rod = intIn(s.rod, 0, RODS.length - 1, 0);
   out.rod = owned.has(rod) ? rod : 0;
-  // 인벤토리: 실제 있는 물고기 이름과 이로치만, 숫자는 숫자만
+  // 인벤토리와 어항: 실제 있는 물고기 이름과 이로치만, 숫자는 숫자만
   const ids = new Set();
-  if (Array.isArray(s.inv)) {
-    for (const it of s.inv.slice(0, 5000)) {
+  const cleanItems = (arr, max) => {
+    const list = [];
+    if (!Array.isArray(arr)) return list;
+    for (const it of arr.slice(0, max)) {
       if (!it || typeof it !== 'object') continue;
       const f = typeof it.name === 'string' ? findFish(it.name) : null;
       if (!f) continue;
       const weight = Number(it.weight);
       if (!Number.isFinite(weight) || weight <= 0 || weight > 10000) continue;
-      const mut = mutKey(it.mut); // 실제 있는 이로치만, 최대 2개
+      const mut = mutKey(it.mut); // 실제 있는 이로치만, 최대 3개
       let id = intIn(it.id, 1, 1e12, 0);
       if (!id || ids.has(id)) id = 0; // 나중에 새 번호를 줘요
       if (id) ids.add(id);
-      out.inv.push({ id, name: f.name, weight, mut, price: priceOf(f, weight, mut) }); // 값은 지금 기준으로 다시 계산
+      list.push({ id, name: f.name, weight, mut, price: priceOf(f, weight, mut) }); // 값은 지금 기준으로 다시 계산
     }
-  }
+    return list;
+  };
+  out.inv = cleanItems(s.inv, 5000);
+  // 집: 실제 있는 집 이름만 / 어항: 산 집만, 집마다 정해진 칸 수까지만
+  out.homes = Array.isArray(s.homes) ? [...new Set(s.homes.filter((h) => typeof h === 'string' && HOUSE_INFO[h]))] : [];
+  out.tanks = {};
+  for (const h of out.homes) out.tanks[h] = cleanItems(s.tanks && s.tanks[h], 40); // 칸 수가 바뀌어도 물고기는 안 사라지게 넉넉히
+  // 집 디자인: 산 집만, 실제 있는 디자인 번호만
+  out.houseStyles = {};
+  for (const h of out.homes) { const v = s.houseStyles && s.houseStyles[h]; if (Number.isInteger(v) && v >= 0 && v < HOUSE_STYLES.length) out.houseStyles[h] = v; }
   let next = Math.max(intIn(s.nextId, 1, 1e12, 1), ...[...ids].map((i) => i + 1), 1);
-  for (const it of out.inv) if (!it.id) it.id = next++;
+  for (const it of [...out.inv, ...Object.values(out.tanks).flat()]) if (!it.id) it.id = next++;
   out.nextId = next;
   // 도감: 실제 있는 물고기만
   if (s.dex && typeof s.dex === 'object') {
@@ -2251,6 +2719,10 @@ function cleanSave(s) {
   // 보트: 실제 있는 보트 번호만
   out.boats = Array.isArray(s.boats) ? [...new Set(s.boats.filter((b) => Number.isInteger(b) && b >= 0 && b < BOAT_TYPES.length))] : [];
   out.boat = out.boats.includes(s.boat) ? s.boat : (out.boats[0] ?? -1);
+  out.savedAt = intIn(s.savedAt, 0, 1e15, 0);
+  // 보물 상자 연 시각 (알려진 상자만)
+  out.chests = {};
+  for (const id of ['chest_beach', 'chest_jungle']) if (s.chests && Number.isFinite(Number(s.chests[id]))) out.chests[id] = intIn(s.chests[id], 0, 1e15, 0);
   return out;
 }
 try {
@@ -2264,7 +2736,8 @@ try {
 
 // 화면에 HTML 로 넣는 글자는 꼭 이걸로 감싸요 (< > & " ' 를 그냥 글자로 바꿔요)
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const writeSave = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (_) {} };
+// 저장할 때마다 시각을 적어 둬요 (계정 기록과 비교해서 더 최근 걸 쓰려고). 로그인했으면 계정에도 올려요
+const writeSave = () => { save.savedAt = Date.now(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (_) {} if (typeof scheduleCloudSave === 'function') scheduleCloudSave(); };
 const curRod = () => RODS[save.rod];
 const money = (n) => '$' + n.toLocaleString('en-US');
 
@@ -2390,7 +2863,7 @@ function equip(id) {
       heldFish.scale.multiplyScalar(0.55);
       heldFish.position.set(0, 0.95, -0.5);
     }
-    heldFish.userData = { name: f.name, base: heldFish.position.clone() }; // 팔딱이는 기준 위치
+    Object.assign(heldFish.userData, { name: f.name, base: heldFish.position.clone() }); // 팔딱이는 기준 위치 (원래 기록은 지우지 않고 더해요 — 이로치 이펙트 정보가 들어 있어요)
     person.add(heldFish);
     game.selected = it.id;
   }
@@ -2431,6 +2904,45 @@ const BIG_LINES = [
   '이런 날을 위해 그 많은 노을을 기다렸나 봐요.'
 ];
 let romanceTimer = 0;
+// =====================================================
+//  글리치의 날 — 가끔(20~40분에 한 번, 4분 동안) 세상이 지직거려요
+//  이때 낚은 물고기는 무조건 글리치 이로치가 붙어요 (다른 이로치랑 같이 겹칠 수 있어요)
+// =====================================================
+const glitchDay = { active: false, until: 0, next: performance.now() + (20 + Math.random() * 20) * 60000 };
+function glitchify(fish) {
+  if (!glitchDay.active || !fish) return fish;
+  const names = mutList(fish.mut).map((m) => m.name);
+  if (names.includes('글리치')) return fish;
+  if (names.length >= 3) names.pop(); // 3개가 꽉 찼으면 마지막 걸 글리치로 바꿔요
+  names.unshift('글리치');
+  const mut = mutKey(names.join('+'));
+  const f = findFish(fish.name);
+  return { ...fish, mut, price: priceOf(f, fish.weight, mut) };
+}
+function setGlitchDay(on) {
+  const now = performance.now();
+  glitchDay.active = on;
+  document.body.classList.toggle('glitchDay', on);
+  $('glitchHud').classList.toggle('hidden', !on);
+  if (on) {
+    glitchDay.until = now + 4 * 60000;
+    sayRomance(['세상이 뭔가 이상해요!']);
+    tone(220, 0.08, 'square', 0.05); tone(880, 0.05, 'square', 0.04, 0.09); tone(140, 0.12, 'sawtooth', 0.04, 0.16);
+  } else {
+    glitchDay.next = now + (20 + Math.random() * 20) * 60000;
+    sayRomance(['세상이 다시 멀쩡해졌어요.']);
+  }
+}
+function updateGlitchDay(now) {
+  if (!glitchDay.active && now > glitchDay.next) setGlitchDay(true);
+  else if (glitchDay.active && now > glitchDay.until) setGlitchDay(false);
+  if (glitchDay.active) {
+    const s = Math.ceil((glitchDay.until - now) / 1000);
+    const label = `글리치의 날 · 낚는 물고기마다 글리치! · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    const el = $('glitchHud');
+    if (el.textContent !== label) el.textContent = label;
+  }
+}
 function sayRomance(lines = ROMANCE_LINES) {
   const el = $('romance');
   el.textContent = lines[Math.floor(Math.random() * lines.length)];
@@ -2521,7 +3033,7 @@ function renderDex() {
       const owned = save.owned.includes(i);
       const row = document.createElement('div');
       row.className = 'rodRow' + (owned ? '' : ' locked');
-      row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${owned ? r.name : r.name + ' (미보유)'}</div>${statsHTML(r)}</div>`;
+      row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${owned ? r.name : r.name + ' (미보유)'}</div>${r.perk ? `<div class="perk">${r.perk}</div>` : ''}${statsHTML(r)}</div>`;
       const btn = document.createElement('button');
       btn.className = 'actBtn';
       if (!owned) { btn.textContent = '상점에서 구매'; btn.disabled = true; }
@@ -2538,8 +3050,8 @@ function renderDex() {
 let rodShopKind = 'base';
 function renderRodShop() {
   const list = $('rodShopList');
-  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방' }[rodShopKind];
-  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요' }[rodShopKind] || ''}</div>`;
+  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글 공방' }[rodShopKind];
+  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요', jungle: ' · 정글 연못의 힘센 물고기는 이 낚싯대로만 낚을 수 있어요' }[rodShopKind] || ''}</div>`;
   const grid = document.createElement('div');
   grid.className = 'rodGrid';
   list.appendChild(grid);
@@ -2548,7 +3060,7 @@ function renderRodShop() {
     const owned = save.owned.includes(i);
     const row = document.createElement('div');
     row.className = 'rodRow';
-    row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${r.name}</div>${statsHTML(r)}</div>`;
+    row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${r.name}</div>${r.perk ? `<div class="perk">${r.perk}</div>` : ''}${statsHTML(r)}</div>`;
     const btn = document.createElement('button');
     btn.className = 'actBtn';
     if (owned) { btn.textContent = '보유 중'; btn.disabled = true; }
@@ -2581,18 +3093,15 @@ function sellItems(ids) {
 let sellTab = 'sell';
 document.querySelectorAll('.sellTab').forEach((b) => b.addEventListener('click', () => { sellTab = b.dataset.sell; renderSell(); }));
 const pct = (v) => (v * 100 >= 10 ? Math.round(v * 100) : (v * 100).toFixed(1).replace(/\.0$/, '')) + '%';
-function rarityChances(L) {
-  // fish.js 의 rollFish 와 같은 계산이에요
-  const c = 0.55 - L, u = 0.8 - L * 0.7, r = 0.94 - L * 0.3, l = 0.99 - L * 0.05;
-  return { common: c, uncommon: u - c, rare: r - u, legendary: l - r, mythic: 1 - l };
-}
+// fish.js 의 rollFish 와 똑같은 계산 (운이 높아도 마이너스가 안 나와요)
+const rarityChances = (L) => rarityOdds(L);
 function renderChart() {
   const list = $('sellList');
   const L = curRod().luck;
   const base = rarityChances(0), now = rarityChances(L);
   const rows = Object.entries(RARITY).map(([k, R]) => {
     // 사는 곳 표시: (산) = 산 위 연못, (비) = 비 올 때만
-    const names = FISH.filter((f) => f.rarity === k).map((f) => (save.dex[f.name] ? f.name : '???') + (f.weather === 'rain' ? '(비)' : fishZone(f) === 'mountain' ? '(산)' : '')).join(', ');
+    const names = FISH.filter((f) => f.rarity === k).map((f) => (save.dex[f.name] ? f.name : '???') + (f.weather === 'rain' ? '(비)' : ({ mountain: '(산)', aurora: '(오로라)', sea: '(바다)', jungle: '(정글)' })[fishZone(f)] || '')).join(', ');
     return `<tr><td style="color:${R.color};font-weight:900">${R.label}</td><td>${pct(base[k])}</td><td>${pct(now[k])}</td><td class="fishNames">${names}</td></tr>`;
   }).join('');
   const boost = 1 + L * 1.5;
@@ -2604,7 +3113,7 @@ function renderChart() {
     <table class="chart"><tr><th>희귀도</th><th>기본</th><th>지금</th><th>물고기 (못 잡은 건 ???)</th></tr>${rows}</table>
     <h3 class="chartH">이로치 (확률 높은 순)</h3>
     <table class="chart"><tr><th>이로치</th><th>기본</th><th>지금</th><th>가격</th></tr>${muts}</table>
-    <div class="count" style="margin-top:8px">이로치가 붙으면 절반 확률로 하나 더 굴려서 최대 2개까지 겹쳐요. 겹치면 색이 반반, 가격은 두 배율을 곱해요 (예: 골드 + 다이아 = 20배).</div>`;
+    <div class="count" style="margin-top:8px">이로치가 붙으면 절반 확률로 두 번째, 거기서 또 1/4 확률로 세 번째까지 최대 3개 겹쳐요. 겹치면 색이 칸칸이 나뉘고, 가격은 배율을 전부 곱해요 (예: 골드 + 다이아 = 20배, 글리치 + 다이아 + 방사능 = 840배!).</div>`;
 }
 function renderSell() {
   document.querySelectorAll('.sellTab').forEach((b) => b.classList.toggle('active', b.dataset.sell === sellTab));
@@ -2639,7 +3148,7 @@ function renderSell() {
 }
 
 // ---------- 창 열고 닫기 ----------
-const panels = () => [ui.dexPanel, ui.rodShopPanel, ui.sellPanel, $('setPanel'), $('cookPanel'), $('multiPanel'), $('dressPanel'), $('boatPanel')];
+const panels = () => [ui.dexPanel, ui.rodShopPanel, ui.sellPanel, $('setPanel'), $('cookPanel'), $('multiPanel'), $('dressPanel'), $('boatPanel'), $('housePanel'), $('tankPanel'), $('cloudPanel')];
 const modalOpen = () => panels().some((p) => !p.classList.contains('hidden'));
 function openPanel(p) {
   panels().forEach((x) => x.classList.add('hidden'));
@@ -2652,7 +3161,7 @@ function openPanel(p) {
 
 // ---------- 설정 (시프트 락, 감도) ----------
 const OPT_KEY = 'lakeFishing_options';
-const opts = { shiftLock: true, sens: 1, invert: false, name: '', look: Math.floor(Math.random() * 6), room: 'PLAZA' };
+const opts = { gfx: GFX, shiftLock: true, sens: 1, invert: false, name: '', look: Math.floor(Math.random() * 6), room: 'PLAZA' };
 try {
   // 설정도 검사해서 불러와요
   const o = JSON.parse(localStorage.getItem(OPT_KEY)) || {};
@@ -2668,12 +3177,23 @@ const writeOpts = () => { try { localStorage.setItem(OPT_KEY, JSON.stringify(opt
 function renderOpts() {
   $('optShift').classList.toggle('on', opts.shiftLock);
   $('optInvert').classList.toggle('on', opts.invert);
+  document.querySelectorAll('#optGfx [data-gfx]').forEach((b) => b.classList.toggle('on', b.dataset.gfx === opts.gfx));
+  $('perfInfo').textContent = perfText();
   $('optSens').value = String(opts.sens);
   $('sensVal').textContent = opts.sens.toFixed(1);
 }
 $('setBtn').addEventListener('click', (e) => { e.currentTarget.blur(); renderOpts(); openPanel($('setPanel')); });
 $('optShift').addEventListener('click', () => { opts.shiftLock = !opts.shiftLock; if (!opts.shiftLock) setShiftLock(false); writeOpts(); renderOpts(); });
 $('optInvert').addEventListener('click', () => { opts.invert = !opts.invert; writeOpts(); renderOpts(); });
+// 그래픽 품질 버튼
+document.querySelectorAll('#optGfx [data-gfx]').forEach((b) => b.addEventListener('click', () => {
+  const was = opts.gfx;
+  opts.gfx = GFX = b.dataset.gfx;
+  writeOpts(); renderOpts();
+  if (GFX === 'auto') { gfxAuto.t = 0; gfxAuto.frames = 0; gfxAuto.skip = 1; applyGfx('mid'); } else applyGfx(GFX);
+  // 안티앨리어싱은 새로고침해야 바뀌어요
+  if ((was === 'low') !== (GFX === 'low')) $('gfxNote').textContent = '새로고침(F5)하면 완전히 적용돼요.';
+}));
 $('optSens').addEventListener('input', (e) => { opts.sens = Number(e.target.value); writeOpts(); renderOpts(); });
 
 // 시프트 락: 마우스를 화면에 고정하고, 캐릭터가 카메라 방향을 바라봐요
@@ -2746,6 +3266,7 @@ document.querySelectorAll('.modal').forEach((m) => m.addEventListener('click', (
 function interact() {
   if (game.nearTalk) { talkTo(game.nearTalk); return; } // 사람한테 말 걸기 (낚시 중이어도 돼요)
   if (game.nearFire) { sitAtFire(); return; }          // 모닥불에 앉아서 굽기
+  if (game.sitting && game.sitting.house) { standUp(); return; }     // 집 소파·의자에서 일어나기
   if (game.sitting) { renderCook(); openPanel($('cookPanel')); return; } // 앉은 채로 다시 굽기 창
   const s = game.nearShop;
   if (!s || game.state === 'charging' || game.state === 'reeling') return;
@@ -2753,7 +3274,11 @@ function interact() {
   if (s.kind === 'dress') { openDress(); return; }
   if (s.kind === 'boat') { renderBoatShop(); openPanel($('boatPanel')); return; }
   if (s.kind === 'boatcall') { summonBoat(s.caller); return; }
-  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
+  if (s.kind === 'house') { openHouse(s.house); return; }
+  if (s.kind === 'thing') { useThing(s.thing); return; }
+  if (s.kind === 'furn') { if (houseOwned(s.house)) useFurniture(s.house, s.furn); return; }
+  if (s.kind === 'tank') { if (save.homes.includes(s.house.id)) { tankHouse = s.house; renderTank(); openPanel($('tankPanel')); } return; }
+  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3' || s.kind === 'rod4') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora', rod4: 'jungle' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
   else { renderSell(); openPanel(ui.sellPanel); }
 }
 
@@ -2978,8 +3503,13 @@ function cast() {
   const tx = person.position.x + fwdX * dist, tz = person.position.z + fwdZ * dist;
   // 떨어진 곳의 물을 찾아요 (언덕 위 연못이면 물 높이도 높아요)
   const wtr = waterAt(tx, tz);
-  game.inWater = !!wtr && !onDock(tx, tz) && !onIsland(tx, tz);
+  game.inWater = !!wtr && !onDock(tx, tz) && (!onIsland(tx, tz) || !!wtr.jungle);
   game.castWater = game.inWater ? wtr : null;
+  // 정글 물고기는 너무 힘이 세서 정글 공방 낚싯대로만 낚을 수 있어요
+  if (game.inWater && wtr.jungle && curRod().shop !== 'jungle') {
+    game.inWater = false; game.castWater = null;
+    game.blockMsg = '정글 물고기는 힘이 너무 세요! 정글 공방 낚싯대로만 낚을 수 있어요.';
+  }
   game.waterY = game.inWater ? wtr.y : groundY(tx, tz);
   game.bobberTarget.set(tx, game.waterY + (game.inWater ? 0.16 : 0.13), tz);
   rodTipWorld(game.castStart);
@@ -2998,7 +3528,7 @@ function cast() {
 function startReel() {
   // 산 위 연못처럼 운 보너스가 있는 물이면 더해 줘요
   // 산 위 연못이면 그곳에만 사는 신기한 물고기가 나와요
-  const fish = rollFish(curRod().luck + (game.castWater?.luck || 0) + (isNight() ? 0.05 : 0) + buffLuck(), game.castWater?.zone || 'lake', isRaining()); // 밤에는 운 +5%
+  const fish = glitchify(rollFish(curRod().luck + (game.castWater?.luck || 0) + (isNight() ? 0.05 : 0) + buffLuck(), game.castWater?.zone || 'lake', isRaining())); // 밤에는 운 +5%, 글리치의 날엔 글리치
   const f = findFish(fish.name);
   const R = RARITY[f.rarity];
   // 초록 칸 크기는 낚싯대가 정해요 (어떤 물고기든 같아요). 물고기 희귀도는 날뛰는 속도만 바꿔요.
@@ -3075,8 +3605,23 @@ function jump() {
   if (modalOpen() || game.jumping) return;
   startAudio();
   if (game.inBoat) { toggleBoat(); return; }  // 보트에서 뛰어내리기
-  if (game.swimming) return;                   // 물속에서는 못 뛰어요
   if (game.sitting) return;                    // 앉아 있을 땐 먼저 일어나요 (WASD)
+  // 내 보트가 가까이 떠 있으면 폴짝 뛰어서 다시 올라타요 (물속에서도 돼요)
+  if (boat.group && boat.type === save.boat && Math.hypot(boat.x - person.position.x, boat.z - person.position.z) < 4.2 &&
+      game.state !== 'charging' && game.state !== 'reeling') {
+    if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+    const p = person.position, ty = boat.group.position.y + BOAT_TYPES[boat.type].seat - 0.6;
+    const v = JUMP_SPEED * 1.1;
+    const tFly = (v + Math.sqrt(v * v + 2 * JUMP_GRAVITY * Math.max(0, p.y - ty))) / JUMP_GRAVITY;
+    game.jumping = true; game.jumpToBoat = true;
+    game.jumpV = v;
+    game.jumpVX = (boat.x - p.x) / tFly;
+    game.jumpVZ = (boat.z - p.z) / tFly;
+    player.ry = Math.atan2(p.x - boat.x, p.z - boat.z);
+    tone(520, 0.08, 'square', 0.04); tone(780, 0.1, 'square', 0.03, 0.04);
+    return;
+  }
+  if (game.swimming) return;                   // 물속에서는 못 뛰어요
   if (fishAnim && fishAnim.hold > 3) return;   // 큰 물고기 자랑하는 중
   game.jumping = true;
   game.jumpV = JUMP_SPEED;
@@ -3112,6 +3657,7 @@ window.addEventListener('keydown', (e) => {
   if (mk) { keys[mk] = true; e.preventDefault(); }
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyB') toggleBag(); // 가방 열고 닫기
+  if (e.code === 'KeyF' && !e.repeat) setFirstPerson(!cam.fp); // 1인칭 켜고 끄기
   if (e.code === 'KeyV' && !e.repeat) toggleBoat(); // 보트 타기/내리기
   // 달리기 켜기/끄기: Ctrl 을 한 번 눌렀다 떼요 (꾹 누른 채 W 를 누르면 브라우저 탭이 닫히니 조심!)
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) { e.preventDefault(); game.running = !game.running; $('runHud').classList.toggle('hidden', !game.running); }
@@ -3143,7 +3689,7 @@ window.addEventListener('focus', releaseAllKeys);
 document.addEventListener('visibilitychange', releaseAllKeys);
 
 // 마우스: 왼쪽 = 낚시, 오른쪽 드래그 = 화면 돌리기, 휠 = 확대
-const cam = { yaw: 0.62, pitch: 0.46, dist: 11 };
+const cam = { yaw: 0.62, pitch: 0.46, dist: 11, fp: false }; // fp = 1인칭 (휠로 끝까지 당기거나 F 키)
 const canvas = renderer.domElement;
 let dragging = false, lastX = 0, lastY = 0;
 canvas.addEventListener('pointerdown', (e) => {
@@ -3171,17 +3717,34 @@ window.addEventListener('pointermove', (e) => {
   lastX = e.clientX; lastY = e.clientY;
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('wheel', (e) => { cam.dist = Math.min(18, Math.max(5, cam.dist + e.deltaY * 0.01)); }, { passive: true });
+// 휠: 멀리/가까이. 가장 가까운 데서 한 번 더 당기면 1인칭, 1인칭에서 밀면 다시 3인칭
+canvas.addEventListener('wheel', (e) => {
+  if (cam.fp) { if (e.deltaY > 0) setFirstPerson(false); return; }
+  if (cam.dist <= 5.01 && e.deltaY < 0) { setFirstPerson(true); return; }
+  cam.dist = Math.min(18, Math.max(5, cam.dist + e.deltaY * 0.01));
+}, { passive: true });
+function setFirstPerson(on) {
+  cam.fp = on;
+  hero.head.visible = !on; // 내 머리가 화면을 가리지 않게
+  game.notice = on ? '1인칭이에요! 휠을 밀거나 F 키로 돌아가요.' : '';
+  if (!on) cam.dist = 5;
+  updateUI();
+}
 
 // 걸어갈 수 있는 곳인지 확인
 const BOUNDS = { x0: -74, x1: 44, z0: -48, z1: 24 };
+// 바다 쪽: 모래사장 + 바다 + 섬은 원래 경계 밖이어도 갈 수 있어요
+const inSeaArea = (x, z) => ((x - SEA.x) / (SEA.rx + SEA.pad - 1)) ** 2 + ((z - SEA.z) / (SEA.rz + SEA.pad - 1)) ** 2 < 1;
 const WADE = 0.32;  // 얕은 물에 들어가면 이만큼 잠겨요
 const SWIM = 1.05;  // 깊은 물에서 헤엄칠 때는 이만큼 잠겨요 (머리만 물 위로)
 const ISLAND_TOP = 0.25;
+// function 으로 만들어서 게임이 켜지는 도중(이 줄보다 먼저)에 불러도 돼요
+function inJunglePond(x, z) { return ((x - JUNGLE_POND.x) / JUNGLE_POND.rx) ** 2 + ((z - JUNGLE_POND.z) / JUNGLE_POND.rz) ** 2 < 1; }
 const isSwimSpot = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && !onBridge2(x, z) && inLake(x, z) && !isShallow(x, z);
 // 발이 닿는 높이: 부두 / 계단 / 섬 / 깊은 물(수영) / 얕은 물 / 언덕 위 / 땅
 function groundY(x, z) {
   if (onDock(x, z)) return 0.26;
+  if (inJunglePond(x, z)) return JUNGLE_POND.y - WADE; // 섬 안 연못은 섬보다 먼저 봐요
   if (onStairs(x, z)) return stairHeight(z) - 0.08;
   if (onIsland(x, z)) return ISLAND_TOP;
   if (onBridge(x, z)) return BRIDGE.y;
@@ -3193,7 +3756,7 @@ function groundY(x, z) {
 }
 // noSwim = true 면 깊은 물에는 못 들어가요 (돌아다니는 NPC 들은 헤엄치지 않아요)
 function walkable(x, z, fromX, fromZ, noSwim = false) {
-  if (x < BOUNDS.x0 || x > BOUNDS.x1 || z < BOUNDS.z0 || z > BOUNDS.z1) return false;
+  if ((x < BOUNDS.x0 || x > BOUNDS.x1 || z < BOUNDS.z0 || z > BOUNDS.z1) && !inSeaArea(x, z)) return false;
   for (const c of colliders) if ((x - c.x) ** 2 + (z - c.z) ** 2 < c.r * c.r) return false;
   if (noSwim && (onIsland(x, z) || isSwimSpot(x, z))) return false;
   // 높이 차이가 크면(절벽) 못 올라가고 못 뛰어내려요. 계단은 한 칸씩이라 괜찮아요.
@@ -3216,12 +3779,7 @@ function updatePlayer(dt) {
   // 모닥불에 앉아 있다가 방향키를 누르면 일어나요
   if (game.sitting && !modalOpen() && (keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD || keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight)) {
     // 일어날 땐 통나무 밖으로 한 걸음 (모닥불 반대쪽) — 통나무 안에 끼지 않게
-    const st = game.sitting;
-    const ax = st.x - campfire.pos.x, az = st.z - campfire.pos.z, l = Math.hypot(ax, az) || 1;
-    person.position.x = st.x + (ax / l) * 0.95;
-    person.position.z = st.z + (az / l) * 0.95;
-    person.position.y = -0.08;
-    game.sitting = null;
+    standUp();
   }
   const canMove = !game.sitting && game.state !== 'charging' && game.state !== 'reeling' && !modalOpen() && !(fishAnim && fishAnim.hold > 3);
   player.moving = canMove && (ix !== 0 || iz !== 0);
@@ -3247,7 +3805,7 @@ function updatePlayer(dt) {
     player.walkT += dt * (game.running && !game.swimming ? 14 : 9);
   }
   // 시프트 락 중에는 항상 카메라가 보는 쪽을 바라봐요 (게 걸음 가능)
-  if (shiftLocked && game.state !== 'reeling') player.ry = cam.yaw;
+  if ((shiftLocked || cam.fp) && game.state !== 'reeling') player.ry = cam.yaw; // 1인칭도 보는 쪽을 바라봐요
   person.rotation.y = player.ry;
   const gy = groundY(person.position.x, person.position.z);
   const wasSwimming = game.swimming;
@@ -3265,7 +3823,14 @@ function updatePlayer(dt) {
     if (game.jumpVX || game.jumpVZ) { p.x += game.jumpVX * dt; p.z += game.jumpVZ * dt; }
     game.jumpV -= JUMP_GRAVITY * dt;
     p.y += game.jumpV * dt;
+    // 보트로 뛰는 중: 보트 자리 높이까지 내려오면 올라타요
+    if (game.jumpToBoat && game.jumpV < 0 && boat.group && p.y <= boat.group.position.y + BOAT_TYPES[boat.type].seat - 0.6) {
+      game.jumping = false; game.jumpToBoat = false; game.jumpVX = game.jumpVZ = 0;
+      boardBoat();
+      return;
+    }
     if (game.jumpV < 0 && p.y <= gy + bob) { // 땅(또는 물)에 닿았어요
+      if (game.jumpToBoat && boat.group) { game.jumpToBoat = false; boardBoat(); }
       p.y = gy + bob; game.jumping = false; game.jumpVX = game.jumpVZ = 0;
       if (game.swimming) plop(0.2, 0, 500, 200, 0.12);
     }
@@ -3281,9 +3846,17 @@ function updatePlayer(dt) {
   if (game.sitting) {
     // 통나무에 앉은 자세: 다리를 앞으로, 몸을 통나무 높이에
     const st = game.sitting;
-    person.position.set(st.x, -0.24, st.z);
+    person.position.set(st.x, st.y ?? -0.24, st.z);
     player.ry = st.ry;
     person.rotation.y = st.ry;
+    person.rotation.x = st.lie ? -1.3 : 0; // 해먹은 뒤로 누워요
+    if (st.swing) { // 그네: 줄에 매달린 의자와 같이 앞뒤로
+      const a = Math.sin(performance.now() * 0.0024) * 0.55, g = st.swing, L = 1.86;
+      g.rotation.x = a;
+      const oz = -L * Math.sin(a), oy = -L * Math.cos(a);
+      const c = Math.cos(g.rotation.y), sn = Math.sin(g.rotation.y);
+      person.position.set(g.position.x + oz * sn, g.position.y + oy - 0.5, g.position.z + oz * c);
+    }
     hero.legs.forEach((l) => (l.rotation.x = Math.PI / 2));
   }
 
@@ -3433,7 +4006,14 @@ function updateQuestHud() {
 // =====================================================
 //  모닥불 — 통나무에 앉아서 불멍하고, 물고기를 구워 먹으면 잠깐 운이 올라요
 // =====================================================
-const BUFF_BY_RARITY = { common: 0.03, uncommon: 0.06, rare: 0.1, legendary: 0.15, mythic: 0.22 };
+// 모닥불 버프: 비싼 물고기(이로치면 값이 몇 배라 더 좋아요)일수록 운이 더 오르고 오래가요
+//  $30 → 운 +4% · 1분 36초 / $3,000 → +12% · 3분 30초 / $300,000 → +20% · 5분 30초
+function cookBuff(it) {
+  const k = Math.log10(1 + Math.max(0, it.price) / 10);
+  const luck = Math.round(Math.min(0.3, 0.02 + 0.04 * k) * 100) / 100;
+  const secs = Math.round(Math.min(900, 60 + 60 * k) / 5) * 5;
+  return { luck, secs };
+}
 function sitAtFire() {
   // 가까운 통나무에 앉아요
   const p = person.position;
@@ -3448,13 +4028,12 @@ function sitAtFire() {
 function renderCook() {
   const list = $('cookList');
   const b = game.buff && performance.now() < game.buff.until ? game.buff : null;
-  list.innerHTML = `<div class="count">${b ? `지금 버프: <b style="color:#ffd36b">운 +${Math.round(b.luck * 100)}%</b> (${Math.ceil((b.until - performance.now()) / 1000)}초 남음) · 더 좋은 걸 구우면 바뀌어요` : '물고기를 구워 먹으면 잠깐 운이 올라요. 귀한 물고기일수록, 이로치면 더 좋아요.'}</div>`;
+  list.innerHTML = `<div class="count">${b ? `지금 버프: <b style="color:#ffd36b">운 +${Math.round(b.luck * 100)}%</b> (${Math.ceil((b.until - performance.now()) / 1000)}초 남음) · 더 좋은 걸 구우면 바뀌어요` : '물고기를 구워 먹으면 잠깐 운이 올라요. 비싼 물고기일수록 운이 더 오르고 더 오래가요.'}</div>`;
   if (!save.inv.length) { list.insertAdjacentHTML('beforeend', '<div class="count">구울 물고기가 없어요. 호수에서 낚아 오세요.</div>'); return; }
   for (let i = save.inv.length - 1; i >= 0; i--) {
     const it = save.inv[i];
     const f = findFish(it.name);
-    const luck = (BUFF_BY_RARITY[f.rarity] || 0.03) + (it.mut ? 0.03 : 0);
-    const secs = Math.round(Math.min(300, 120 + it.weight * 4));
+    const { luck, secs } = cookBuff(it);
     const row = document.createElement('div');
     row.className = 'sellRow';
     row.innerHTML = `<span class="nm">${mutHTML(it.mut) ? mutHTML(it.mut) + ' ' : ''}${esc(it.name)} <span style="color:#aaa;font-weight:400">${esc(fmtKg(it.weight))}</span></span><span class="pr" style="color:#ffd36b">운 +${Math.round(luck * 100)}% · ${Math.floor(secs / 60)}분 ${secs % 60 ? (secs % 60) + '초' : ''}</span>`;
@@ -3679,12 +4258,41 @@ function updateCamera() {
   // 그림자가 주인공 주변에 생기도록 해를 같이 옮겨요
   sunsetLight.position.set(p.x - 9, 15, p.z + 7);
   sunsetLight.target.position.set(p.x, 0, p.z);
+  // 망원경으로 보는 중: 멀리 확대해서 봐요
+  if (teleView && performance.now() < teleView.until) {
+    camera.position.copy(teleView.from);
+    if (camera.fov !== 14) { camera.fov = 14; camera.updateProjectionMatrix(); }
+    camera.lookAt(teleView.target);
+    sun.lookAt(camera.position); halo.lookAt(camera.position);
+    return;
+  }
+  if (teleView) { teleView = null; camera.fov = 43; camera.updateProjectionMatrix(); }
+  // 1인칭: 눈 높이에서 보는 쪽으로 (마우스 위아래 = 고개 들기/숙이기)
+  if (cam.fp) {
+    const look = (0.65 - cam.pitch) * 1.4;
+    const fx = -Math.sin(cam.yaw) * Math.cos(look), fy = Math.sin(look), fz = -Math.cos(cam.yaw) * Math.cos(look);
+    const eye = tmpV.set(p.x - Math.sin(cam.yaw) * 0.18, p.y + (game.sitting ? 1.25 : 1.62), p.z - Math.cos(cam.yaw) * 0.18);
+    camera.position.copy(eye);
+    camera.lookAt(eye.x + fx, eye.y + fy, eye.z + fz);
+    sun.lookAt(camera.position); halo.lookAt(camera.position);
+    return;
+  }
   camDir.set(Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), Math.cos(cam.yaw) * Math.cos(cam.pitch));
   let dist = cam.dist;
   camRay.set(tmpV.set(p.x, ty, p.z), camDir);
   camRay.far = cam.dist;
   const hit = camRay.intersectObjects([...shops.map((s) => s.group), terrain], true)[0];
   if (hit) dist = Math.max(1.5, hit.distance - 0.3);
+  // 정글섬: 나무 줄기가 카메라와 나 사이에 끼면 카메라를 줄기 앞으로 당겨요 (줄기에 화면이 가려지지 않게)
+  if (Math.hypot(p.x - JUNGLE.x, p.z - JUNGLE.z) < JUNGLE.r + 6) {
+    dist = Math.min(dist, 10); // 너무 멀리 빼면 높은 나무 잎 속에 카메라가 들어가요
+    const hl = Math.hypot(camDir.x, camDir.z) || 1, hx = camDir.x / hl, hz = camDir.z / hl, hd = dist * hl;
+    for (const tr of seaWorld.trunks) {
+      const cx = tr.x - p.x, cz = tr.z - p.z, t = cx * hx + cz * hz;
+      if (t <= 0 || t >= hd) continue;
+      if (Math.hypot(cx - t * hx, cz - t * hz) < tr.r + 0.35) dist = Math.min(dist, Math.max(1.5, t / hl - 0.5));
+    }
+  }
   // 시프트 락이면 카메라를 오른쪽 어깨 쪽으로 살짝 옮겨요
   const sh = shiftLocked ? 1.1 : 0;
   const rx = Math.cos(cam.yaw) * sh, rz = -Math.sin(cam.yaw) * sh;
@@ -3731,8 +4339,10 @@ function updatePrompt() {
 let previous = 0;
 const arm = { r: 1.2 };
 
+let waterAcc = 1; // 물결 다시 계산할 때까지 남은 시간
 function animate(now) {
   requestAnimationFrame(animate);
+  if (previous) tickFps(now - previous);
   const dt = Math.min(0.033, Math.max(0, (now - previous) / 1000));
   previous = now;
   const t = now * 0.001;
@@ -3752,7 +4362,10 @@ function animate(now) {
     f.scale.setScalar(0.6 + q * 1.4);
     f.material.opacity = (1 - q) * 0.6;
   });
-  for (const w of waterParts) {
+  // 물결은 1초에 30번만 다시 계산해요 (144Hz 모니터에서 매번 하면 너무 무거워요. 눈으로는 똑같아요)
+  waterAcc += dt;
+  if (waterAcc >= 1 / 30) for (const w of waterParts) {
+    if (++w.tick % w.every) continue;
     const arr = w.geo.attributes.position.array, b = w.base;
     for (let i = 0; i < arr.length; i += 3) {
       // 월드 좌표 기준으로 물결을 만들어서 호수와 연못이 이어져 보여요
@@ -3761,6 +4374,7 @@ function animate(now) {
     w.geo.attributes.position.needsUpdate = true;
     w.geo.computeVertexNormals();
   }
+  if (waterAcc >= 1 / 30) waterAcc = 0;
 
   // 반딧불 둥실둥실
   const wp = wispGeo.attributes.position.array;
@@ -3786,7 +4400,8 @@ function animate(now) {
   // 찌가 땅에 떨어졌으면
   if (game.state === 'casting' && !game.inWater && now - game.castStartedAt > game.castFlight + 500) {
     game.state = 'missed';
-    game.notice = '물이 아닌 곳에 떨어졌어요. 호수 쪽을 보고 던져 보세요.';
+    game.notice = game.blockMsg || '물이 아닌 곳에 떨어졌어요. 호수 쪽을 보고 던져 보세요.';
+    game.blockMsg = null;
     updateUI();
   }
   if (game.state === 'casting' && game.inWater && now >= game.biteAt) {
@@ -3979,17 +4594,28 @@ function animate(now) {
   }
   shopRodSpins.forEach((s) => placeSpin(s, t));
   // 공방 앞 전시대: 낚싯대가 천천히 돌고 살짝 떠올라요
-  for (const d of displayRods) { d.holder.rotation.y = t * 0.6 + d.ph; d.holder.position.y = 0.72 + ROD_LEN / 2 * 1.05 + Math.sin(t * 1.2 + d.ph) * 0.06; placeSpin(d.sp, t); }
+  for (const d of displayRods) { d.holder.rotation.y = t * 0.6 + d.ph; d.holder.position.y = (d.base ?? 0.72) + ROD_LEN / 2 * 1.05 + Math.sin(t * 1.2 + d.ph) * 0.06; placeSpin(d.sp, t); }
 
   updateNPCs(now, dt, t);
   updateWalkers(now, dt, t);
   multi.update(now, dt, t);
   updateWade(t);
   updateShopBoats(t);
+  updateHouses(t);
+  updateIslandHud(now);
+  // 꾸밈 효과들: 혹시 여기서 문제가 생겨도 게임 전체가 멈추지 않게 따로 감싸요
+  try { updateFishFx(t); } catch (e) { console.warn('[이로치 이펙트]', e); } // 이로치 반짝이·지직
+  try { updateGlitchDay(now); } catch (e) { console.warn('[글리치의 날]', e); }
+  try { updateThings(t); } catch (e) { console.warn('[섬 물건]', e); }
+
   updateDressCam();
   updateCamera();
   updatePrompt();
   updateBubble();
+  gfxAutoTick(dt);
+  // '좋음'이 아니면 그림자는 두 장면에 한 번만 다시 그려요 (눈으로는 거의 똑같고 훨씬 가벼워요)
+  shadowFrame++;
+  renderer.shadowMap.needsUpdate = gfxNow === 'high' || shadowFrame % 2 === 0;
   renderer.render(scene, camera);
 }
 
@@ -4014,6 +4640,7 @@ window.setGameState = (patch = {}) => {
   if (patch.z !== undefined) person.position.z = patch.z;
   if (patch.ry !== undefined) player.ry = patch.ry;
   if (patch.yaw !== undefined) cam.yaw = patch.yaw;
+  if (patch.glitch !== undefined) setGlitchDay(!!patch.glitch); // 시험용: 글리치의 날 켜고 끄기
   if (patch.state === 'reeling') { game.bobberTarget.set(person.position.x, 0.18, person.position.z - 4); startReel(); }
   else if (patch.state) game.state = patch.state;
   updateUI();
@@ -4141,6 +4768,98 @@ $('saveLoadCode').addEventListener('click', () => {
 ['multiName', 'multiRoom', 'saveCodeBox'].forEach((id) => { const el = $(id); if (el) el.addEventListener('keydown', (e) => e.stopPropagation()); });
 
 // =====================================================
+//  계정(구글 로그인) — 로그인하면 기록이 계정에 저장돼서, 어느 컴퓨터에서든 이어서 해요
+//  (설정값이 없으면 이 부분은 아무것도 안 해요)
+// =====================================================
+const CLOUD_UID_KEY = 'lakeFishing_cloudUid'; // 이 컴퓨터 기록이 어느 계정 거였는지
+// var: 게임이 켜지는 도중(이 줄보다 먼저) 저장해도 오류가 안 나게
+var cloud = { user: null, ready: false, pending: true, timer: 0, busy: false };
+const cloudMsg = (t) => { const el = $('accountMsg'); if (el) el.textContent = t; };
+function renderAccount() {
+  $('accountRow').classList.toggle('hidden', !cloudEnabled);
+  $('accountBtn').classList.toggle('hidden', !cloudEnabled);
+  if (!cloudEnabled) return;
+  const u = cloud.user;
+  $('accountName').textContent = u ? `${u.name} 님으로 로그인했어요. 기록이 계정에 자동으로 저장돼요.` : '로그인하면 기록이 계정에 저장돼서 피씨방·다른 컴퓨터에서도 이어서 할 수 있어요.';
+  $('accountLogin').classList.toggle('hidden', !!u);
+  $('accountLogout').classList.toggle('hidden', !u);
+  $('accountBtn').textContent = u ? `${u.name} 님` : '로그인';
+}
+// 기록을 바꾸면 조금 있다가(8초) 한 번에 올려요 (너무 자주 올리면 무료 한도를 넘어요)
+function scheduleCloudSave() {
+  if (!cloud || !cloud.user || cloud.pending || cloud.timer) return;
+  cloud.timer = setTimeout(flushCloudSave, 8000);
+}
+async function flushCloudSave() {
+  clearTimeout(cloud.timer); cloud.timer = 0;
+  if (!cloud.user || cloud.pending || cloud.busy) return;
+  cloud.busy = true;
+  try { await saveCloud(cloud.user.uid, JSON.stringify(save), save.savedAt || Date.now()); cloudMsg('계정에 저장했어요.'); }
+  catch (e) { cloudMsg('계정에 저장하지 못했어요. 인터넷 연결을 확인해 주세요. (이 컴퓨터에는 저장돼 있어요)'); console.warn('[로그인] 저장 실패', e); }
+  cloud.busy = false;
+}
+// 계정 기록으로 바꾸기: 이 컴퓨터 기록을 덮어쓰고 새로고침
+function useCloudSave(c, uid) {
+  try { localStorage.setItem(SAVE_KEY, c.data); localStorage.setItem(CLOUD_UID_KEY, uid); } catch (_) {}
+  location.reload();
+}
+// 지금 기록을 계정에 올리고 이 계정과 연결
+async function useLocalSave(uid) {
+  try { localStorage.setItem(CLOUD_UID_KEY, uid); } catch (_) {}
+  cloud.pending = false;
+  await flushCloudSave();
+  reconcileHouses(); // 이 컴퓨터에서 산 집을 계정에 등록 (또는 이미 남의 집이면 돌려받기)
+}
+const summary = (s) => `돈 ${money(s.money)} · 잡은 수 ${s.caught.toLocaleString('en-US')}마리 · 낚싯대 ${RODS[s.rod].name}`;
+async function onCloudUser(u) {
+  cloud.user = u;
+  cloud.pending = true;
+  renderAccount();
+  if (!u) { cloudMsg(''); if (seaWorld) seaWorld.houses.forEach(syncHouse); return; }
+  cloudMsg('계정 기록을 확인하는 중…');
+  let c;
+  try { c = await loadCloud(u.uid); }
+  catch (e) { cloudMsg('계정 기록을 불러오지 못했어요. 인터넷 연결이나 Firebase 설정을 확인해 주세요.'); console.warn('[로그인] 불러오기 실패', e); return; }
+  let linked = null;
+  try { linked = localStorage.getItem(CLOUD_UID_KEY); } catch (_) {}
+  if (!c) { await useLocalSave(u.uid); game.notice = `로그인했어요! 이제 기록이 ${u.name} 님 계정에 저장돼요.`; updateUI(); return; }
+  let cs;
+  try { cs = cleanSave(JSON.parse(c.data)); } catch (_) { await useLocalSave(u.uid); return; } // 계정 기록이 깨졌으면 지금 걸로
+  const localEmpty = save.money === 0 && save.caught === 0 && save.inv.length === 0;
+  if (linked === u.uid || localEmpty) {
+    // 같은 계정 기록이면(또는 이 컴퓨터가 새것이면) 더 최근 것을 써요
+    if (localEmpty || (c.savedAt || 0) > (save.savedAt || 0)) { if (c.data !== JSON.stringify(save)) return useCloudSave(c, u.uid); }
+    await useLocalSave(u.uid);
+    cloudMsg(`${u.name} 님 계정과 연결됐어요.`);
+    return;
+  }
+  // 다른 기록끼리 만났어요 → 어느 걸 쓸지 물어봐요
+  $('cloudChoice').innerHTML = `<div class="count">계정에 저장된 기록과 이 컴퓨터의 기록이 달라요. 어느 걸로 할까요?<br>고르지 않은 기록은 사라져요.</div>
+    <div class="setRow col"><div><div class="nm">계정 기록</div><div class="ds">${esc(summary(cs))}</div></div><button id="pickCloud" class="actBtn">계정 기록으로 하기</button></div>
+    <div class="setRow col"><div><div class="nm">이 컴퓨터 기록</div><div class="ds">${esc(summary(save))}</div></div><button id="pickLocal" class="actBtn">이 컴퓨터 기록을 계정에 올리기</button></div>`;
+  $('pickCloud').onclick = () => useCloudSave(c, u.uid);
+  $('pickLocal').onclick = async () => { closePanels(); await useLocalSave(u.uid); game.notice = '이 컴퓨터 기록을 계정에 올렸어요.'; updateUI(); };
+  openPanel($('cloudPanel'));
+}
+$('accountLogin').addEventListener('click', async () => {
+  cloudMsg('구글 로그인 창을 여는 중… (팝업이 막히면 주소창 옆에서 허용해 주세요)');
+  try { await signIn(); }
+  catch (e) { cloudMsg(e && e.code === 'auth/popup-closed-by-user' ? '로그인을 취소했어요.' : '로그인하지 못했어요. 팝업 차단이나 Firebase 설정(허용 도메인)을 확인해 주세요.'); console.warn('[로그인]', e); }
+});
+$('accountLogout').addEventListener('click', async () => {
+  await flushCloudSave();
+  try { await signOutCloud(); } catch (_) {}
+  game.notice = '로그아웃했어요. 기록은 이 컴퓨터에도 남아 있어요.'; updateUI();
+});
+$('accountBtn').addEventListener('click', (e) => { e.currentTarget.blur(); renderOpts(); openPanel($('setPanel')); });
+// 창을 닫거나 다른 탭으로 가면 바로 올려요
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && cloud.timer) flushCloudSave(); });
+window.addEventListener('pagehide', () => { if (cloud.timer) flushCloudSave(); });
+renderAccount();
+startCloud(onCloudUser);
+
+
+// =====================================================
 //  탈의실 — 옷과 액세서리를 바꾸면 주인공을 새로 만들어요
 // =====================================================
 function rebuildHero(outfit) {
@@ -4246,7 +4965,8 @@ function renderBoatShop() {
     list.appendChild(row);
   });
 }
-const boatWaterOK = (x, z) => inLake(x, z) && !onIsland(x, z) && !onDock(x, z) && !onBridge(x, z) && !onBridge2(x, z);
+const boatWaterOK = (x, z) => inLake(x, z) && !onIsland(x, z) && !onDock(x, z) && !onBridge(x, z) && !onBridge2(x, z) &&
+  !colliders.some((c) => c.r > 0.9 && (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r + 0.6) ** 2); // 바다 바위 기둥 같은 큰 것에 부딪혀요
 function removeBoat() { if (boat.group) scene.remove(boat.group); boat.group = null; game.inBoat = false; }
 function spawnBoat(x, z, ry) {
   removeBoat();
@@ -4290,7 +5010,7 @@ function toggleBoat() {
   const p = person.position;
   // 띄워 둔 내 보트가 가까이 있을 때만 V 로 다시 탈 수 있어요. 새로 띄우는 건 보트 관리인이 해 줘요
   if (!(boat.group && boat.type === save.boat && Math.hypot(boat.x - p.x, boat.z - p.z) < 3.2)) {
-    game.notice = '호숫가의 보트 관리인(보트 상점 옆, 호수 건너편)한테 가서 E 키를 누르면 보트를 불러 줘요.'; updateUI(); return;
+    game.notice = '가까운 보트 관리인(호숫가·모래사장·섬 선착장)한테 가서 E 키를 누르면 보트를 불러 줘요.'; updateUI(); return;
   }
   boardBoat();
 }
@@ -4340,7 +5060,7 @@ function updateBoat(dt) {
   const t = performance.now() * 0.001;
   placeBoat(t);
   // 주인공: 보트 자리에 앉기
-  const seatY = boat.group.position.y + (boat.type === 1 ? 0.48 : 0.38) - 0.6;
+  const seatY = boat.group.position.y + BOAT_TYPES[boat.type].seat - 0.6;
   person.position.set(boat.x + Math.sin(boat.ry) * 0.25, seatY, boat.z + Math.cos(boat.ry) * 0.25);
   player.ry = shiftLocked ? cam.yaw : boat.ry;
   person.rotation.set(0, player.ry, 0);
@@ -4348,6 +5068,388 @@ function updateBoat(dt) {
   if (player.moving) player.walkT += dt * 6;
   game.nearShop = null; game.nearTalk = null; game.nearFire = false;
 }
+// =====================================================
+//  집 — 바다 섬의 큰 집을 사면 문이 열리고, 안의 어항에 물고기를 전시할 수 있어요
+// =====================================================
+let tankHouse = null;
+// 집 주인 목록 (Firebase): { 집id: { owner: 계정 번호, name, style } }. null = 아직 모름(로그인 설정 전·못 읽음)
+let houseOwners = null;
+const myUid = () => (typeof cloud !== 'undefined' && cloud && cloud.user ? cloud.user.uid : null);
+function houseOwned(h) { return save.homes.includes(h.id); }
+// 다른 사람이 주인인 집이면 그 사람 정보
+function houseOther(h) {
+  if (houseOwned(h) || !houseOwners) return null;
+  const o = houseOwners[h.id];
+  return o && o.owner !== myUid() ? o : null;
+}
+// 문 열기/닫기 + 디자인 + 이름표 (내 집만 문이 열려 있어요)
+function syncHouse(h) {
+  const own = houseOwned(h);
+  if (own && !h.open) {
+    h.open = true;
+    for (const c of h.doorCol) { const i = colliders.indexOf(c); if (i >= 0) colliders.splice(i, 1); }
+    h.door.rotation.y = -Math.PI / 2;            // 문이 안쪽으로 활짝
+    h.door.position.x = h.x - 0.85; h.door.position.z = h.z0 + 0.9;
+  } else if (!own && h.open) {
+    h.open = false;                               // 다시 잠가요 (집을 내놓았거나 다른 사람 집이 됐을 때)
+    for (const c of h.doorCol) if (!colliders.includes(c)) colliders.push(c);
+    h.door.rotation.y = 0;
+    h.door.position.x = h.x; h.door.position.z = h.z0;
+    for (const f of h.fish) scene.remove(f.model);
+    h.fish = [];
+  }
+  const other = houseOther(h);
+  // 디자인: 내 집이면 내가 고른 것, 남의 집이면 주인이 고른 것, 아니면 처음 디자인
+  h.setStyle(own && save.houseStyles[h.id] !== undefined ? save.houseStyles[h.id] : other && other.style !== null ? other.style : h.defaultStyle);
+  const entry = shops.find((s) => s.kind === 'house' && s.house === h);
+  if (entry) entry.title = own ? `${h.name} · 내 집 (E 로 디자인 바꾸기)` : other ? `${h.name} · ${other.name} 님의 집` : `${h.name} · ${money(h.price)} (E 로 구경·구매)`;
+  if (own) rebuildTankFish(h);
+}
+// 내 집 하나를 잃을 때 (다른 사람이 먼저 샀거나, 내가 내놓을 때): 어항 물고기는 가방으로, 돈은 refund 만큼 돌려받아요
+function loseHouse(h, refund) {
+  const fish = save.tanks[h.id] || [];
+  save.inv.push(...fish);
+  delete save.tanks[h.id];
+  delete save.houseStyles[h.id];
+  save.homes = save.homes.filter((x) => x !== h.id);
+  save.money = Math.min(MAX_MONEY, save.money + refund);
+  writeSave();
+  syncHouse(h); renderHotbar(); updateUI();
+}
+// 로그인했고 주인 목록을 알면: 이 컴퓨터에서 산 집을 계정에 등록하거나, 이미 남의 집이면 돌려받아요
+let reconciling = false;
+async function reconcileHouses() {
+  if (reconciling || !houseOwners || !myUid() || cloud.pending) return;
+  reconciling = true;
+  for (const h of seaWorld.houses) {
+    if (!houseOwned(h)) continue;
+    const o = houseOwners[h.id];
+    if (o && o.owner === myUid()) continue;
+    if (o) { // 다른 사람이 먼저 샀어요 → 돈과 물고기를 돌려받아요
+      loseHouse(h, h.price);
+      game.notice = `${h.name}은(는) ${o.name} 님이 먼저 샀어요. 낸 돈 ${money(h.price)}과 어항 물고기를 돌려받았어요.`; updateUI();
+      continue;
+    }
+    try { await claimHouse(h.id, myUid(), cloud.user.name, save.houseStyles[h.id] ?? h.defaultStyle); } // 아직 주인이 없으면 내 걸로 등록
+    catch (e) { if (e.code !== 'taken') console.warn('[집] 등록 실패', e); }
+  }
+  reconciling = false;
+}
+function onHouseOwners(map) {
+  houseOwners = map;
+  seaWorld.houses.forEach(syncHouse);
+  reconcileHouses();
+}
+
+// 앉아 있다가 일어나기 (모닥불 통나무면 불 반대쪽으로 한 걸음, 집 가구면 정해 둔 자리로)
+function standUp() {
+  const st = game.sitting;
+  if (!st) return;
+  if (st.stand) { person.position.set(st.stand[0], groundY(st.stand[0], st.stand[1]), st.stand[1]); }
+  else {
+    const ax = st.x - campfire.pos.x, az = st.z - campfire.pos.z, l = Math.hypot(ax, az) || 1;
+    person.position.x = st.x + (ax / l) * 0.95;
+    person.position.z = st.z + (az / l) * 0.95;
+    person.position.y = -0.08;
+  }
+  game.sitting = null;
+}
+// =====================================================
+//  집 가구 쓰기: 소파(앉기) · 침대(자고 나면 아침 + 상쾌함) · 벽난로(불 켜기/끄기) · 책장(낚시 꿀팁)
+//               식탁(차 마시기 + 따뜻함) · 피아노(연주)
+// =====================================================
+const BOOK_TIPS = [
+  '「낚시 꿀팁」 밤에는 운이 조금 더 좋아요. 노을이 지면 낚싯대를 꺼내 보세요.',
+  '「바다 이야기」 바다 저 멀리엔 범고래가 산대요. 신화 등급이라 아주 드물어요.',
+  '「이로치 도감」 이로치는 최대 3개까지 겹쳐요. 글리치는 혼자서도 12배!',
+  '「오로라 강의 비밀」 오로라 강엔 거대한 물고기가 살지만, 싸고 예쁜 작은 물고기도 많아요.',
+  '「모닥불 요리책」 비싼 물고기를 구울수록 운이 더 오르고 더 오래가요.',
+  '「비 오는 날」 비가 오면 큰 호수에 무지개 붕어가 나타난대요.',
+  '「섬 지도」 모래사장 부두 앞 표지판에 섬들의 방향이 적혀 있어요.'
+];
+// 약한 버프만 주는 가구 (지금 더 센 버프가 있으면 그대로 둬요)
+function softBuff(luck, secs) {
+  const now = performance.now();
+  if (!game.buff || now > game.buff.until || game.buff.luck < luck) game.buff = { luck, until: now + secs * 1000 };
+}
+function useFurniture(h, f) {
+  if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+  if (game.rodOut || game.selected) equip(null);
+  if (f.seat) {
+    // 앉기 (소파·식탁 의자·피아노 의자)
+    game.sitting = { ...f.seat, stand: f.stand, house: true };
+  }
+  if (f.type === 'sofa') { game.notice = '푹신한 소파에 앉았어요. E 또는 방향키로 일어나요.'; }
+  else if (f.type === 'bed') {
+    // 잠깐 화면이 깜깜해졌다가 아침이 돼요
+    const fade = $('sleepFade');
+    fade.classList.add('on');
+    tone(392, 0.4, 'sine', 0.05); tone(330, 0.5, 'sine', 0.05, 0.4); tone(262, 0.7, 'sine', 0.05, 0.9);
+    setTimeout(() => {
+      tod = 0.8; // 아침 7시쯤
+      softBuff(0.06, 240);
+      game.notice = '푹 잤어요! 상쾌한 아침이에요. (상쾌함: 운 +6% · 4분)';
+      updateUI();
+      fade.classList.remove('on');
+    }, 1300);
+    game.notice = '쿨쿨…';
+  } else if (f.type === 'fire') {
+    h.fireOn = !h.fireOn;
+    game.notice = h.fireOn ? '벽난로에 불을 붙였어요. 따뜻해요.' : '벽난로 불을 껐어요.';
+    noise(0.05, 0, 0.6, 3000, 1500, 'highpass', 0.3);
+  } else if (f.type === 'book') {
+    game.notice = BOOK_TIPS[Math.floor(Math.random() * BOOK_TIPS.length)];
+    tone(880, 0.06, 'triangle', 0.03);
+  } else if (f.type === 'tea') {
+    softBuff(0.03, 150);
+    game.notice = '따뜻한 차를 한 잔 마셨어요. (따뜻함: 운 +3% · 2분 30초) E 로 일어나요.';
+    tone(523, 0.1, 'triangle', 0.05); tone(659, 0.12, 'triangle', 0.05, 0.12);
+  } else if (f.type === 'piano') {
+    // 짧은 노래 한 소절 (도레미…)
+    const notes = [523, 587, 659, 523, 659, 698, 784, 0, 784, 880, 784, 698, 659, 523];
+    notes.forEach((n, i) => { if (n) tone(n, 0.28, 'triangle', 0.06, i * 0.22); });
+    game.notice = '피아노를 띵동띵동 쳤어요. E 로 일어나요.';
+  }
+  updateUI();
+}
+// =====================================================
+//  섬·모래사장 물건 쓰기: 해먹(눕기) · 그네(타기) · 망원경(정글섬 보기) · 보물 상자(가끔 돈) · 징(정글의 기운)
+// =====================================================
+let teleView = null;
+const CHEST_COOLDOWN = 15 * 60 * 1000; // 보물 상자는 15분마다 다시 차요
+function useThing(t) {
+  if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+  const front = (d) => [t.x - Math.sin(t.ry || 0) * d, t.z - Math.cos(t.ry || 0) * d];
+  if (t.type === 'hammock') {
+    if (game.rodOut || game.selected) equip(null);
+    game.sitting = { x: t.x, y: (t.y ?? -0.08) + 0.35, z: t.z, ry: (t.ry || 0) + Math.PI / 2, lie: true, house: true, stand: front(1.4) };
+    game.notice = '해먹에 누웠어요. 살랑살랑… (E 또는 방향키로 일어나요)';
+  } else if (t.type === 'swing') {
+    if (game.rodOut || game.selected) equip(null);
+    game.sitting = { x: t.x, y: (t.y ?? -0.08) + 0.04, z: t.z, ry: (t.ry || 0) + Math.PI, swing: t.swingGroup, house: true, stand: front(1.6) };
+    game.notice = '그네를 타요! 바다가 보여요. (E 또는 방향키로 내려요)';
+  } else if (t.type === 'telescope') {
+    const J = seaWorld.islands.find((i) => i.id === 'jungle');
+    teleView = { until: performance.now() + 4500, from: new THREE.Vector3(t.x, 1.9, t.z), target: new THREE.Vector3(J.x, 4, J.z) };
+    game.notice = '망원경으로 보니 저 멀리 정글섬이 보여요! (동남쪽)';
+    tone(660, 0.1, 'triangle', 0.04);
+  } else if (t.type === 'chest') {
+    const last = save.chests[t.id] || 0, nowMs = Date.now();
+    if (nowMs - last < CHEST_COOLDOWN) {
+      const m = Math.ceil((CHEST_COOLDOWN - (nowMs - last)) / 60000);
+      game.notice = `상자가 비어 있어요. ${m}분쯤 뒤에 다시 와 봐요.`;
+    } else {
+      const jungle = t.id === 'chest_jungle';
+      const gold = jungle ? 20000 + Math.floor(Math.random() * 60000) : 500 + Math.floor(Math.random() * 2500);
+      save.chests[t.id] = nowMs;
+      save.money = Math.min(MAX_MONEY, save.money + gold);
+      writeSave(); sfx.coin();
+      tone(784, 0.1, 'triangle', 0.06); tone(988, 0.12, 'triangle', 0.06, 0.1); tone(1318, 0.18, 'triangle', 0.06, 0.2);
+      game.notice = `보물 상자를 열었어요! ${money(gold)}을 찾았어요.`;
+    }
+  } else if (t.type === 'gong') {
+    tone(110, 1.6, 'sine', 0.12); tone(165, 1.4, 'sine', 0.06, 0.02); tone(220, 1.0, 'triangle', 0.03, 0.04);
+    softBuff(0.05, 180);
+    game.notice = '데에엥~ 정글의 기운이 느껴져요. (운 +5% · 3분)';
+  }
+  updateUI();
+}
+function updateThings(t) {
+  for (const th of seaWorld.things) if (th.swingGroup && !(game.sitting && game.sitting.swing === th.swingGroup)) th.swingGroup.rotation.x *= 0.95; // 아무도 안 타면 멈춰요
+  const fx = seaWorld.jungleFx;
+  if (fx.gem) { fx.gem.rotation.y = t * 0.8; fx.gem.position.y += (Math.sin(t * 1.5) * 0.002); }
+  fx.flames.forEach((f, i) => f.scale.set(1 + Math.sin(t * 11 + i) * 0.12, 0.85 + Math.sin(t * 8 + i * 2) * 0.25, 1 + Math.cos(t * 9 + i) * 0.12));
+}
+// 디자인 후보 목록: 색 견본(벽·창틀·지붕·소파) + 이름 + 고르기 버튼
+function designList(h) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<h3 class="chartH">집 디자인 고르기 (공짜로 언제든 바꿀 수 있어요)</h3>';
+  const grid = document.createElement('div');
+  grid.className = 'designGrid';
+  HOUSE_STYLES.forEach((st, i) => {
+    const card = document.createElement('button');
+    card.className = 'designCard' + (h.style === i ? ' on' : '');
+    const sw = (c) => `<i style="background:#${c.toString(16).padStart(6, '0')}"></i>`;
+    card.innerHTML = `<div class="dsw">${sw(st.wall)}${sw(st.trim)}${sw(st.roof)}${sw(st.sofa)}</div><div class="dnm">${esc(st.name)}</div><div class="dst">${h.style === i ? '지금 디자인' : '이걸로 꾸미기'}</div>`;
+    card.onclick = () => {
+      save.houseStyles[h.id] = i;
+      writeSave();
+      h.setStyle(i);
+      if (myUid() && houseOwners) setHouseStyleCloud(h.id, myUid(), i).catch(() => {}); // 다른 사람 화면에도
+      sfx.coin();
+      game.notice = `${h.name}을(를) '${st.name}' 디자인으로 바꿨어요!`;
+      updateUI();
+      openHouse(h);
+    };
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  return wrap;
+}
+function openHouse(h) {
+  const box = $('houseInfo');
+  const own = houseOwned(h);
+  const other = houseOther(h);
+  const slots = HOUSE_INFO[h.id].slots;
+  box.innerHTML = `<div class="count"><b>${esc(h.name)}</b> — 섬 위의 커다란 집이에요. 안에는 소파·침대·벽난로·책장, 그리고 물고기 <b>${slots}마리</b>를 전시할 수 있는 커다란 어항이 있어요.${own ? '' : ` 사면 디자인 ${HOUSE_STYLES.length}가지 중에서 골라 꾸밀 수 있어요.`}<br>집은 섬마다 한 채, <b>먼저 산 사람이 주인</b>이고 한 사람당 한 채만 살 수 있어요.</div>`;
+  const btn = document.createElement('button');
+  btn.className = 'actBtn';
+  if (own) {
+    box.appendChild(designList(h));
+    // 집 내놓기: 반값을 돌려받고, 다른 사람이 살 수 있게 비워요
+    const sell = document.createElement('button');
+    sell.className = 'actBtn';
+    sell.style.marginTop = '10px';
+    sell.textContent = `집 내놓기 (${money(Math.floor(h.price / 2))} 돌려받기)`;
+    sell.onclick = async () => {
+      if (!confirm(`${h.name}을(를) 내놓을까요?\n\n${money(Math.floor(h.price / 2))}을 돌려받고, 어항 물고기는 가방으로 돌아와요. 다른 사람이 살 수 있게 돼요.`)) return;
+      if (myUid() && houseOwners && houseOwners[h.id] && houseOwners[h.id].owner === myUid()) {
+        try { await releaseHouse(h.id); } catch (e) { game.notice = '집을 내놓지 못했어요. 인터넷 연결을 확인해 주세요.'; updateUI(); return; }
+      }
+      loseHouse(h, Math.floor(h.price / 2));
+      closePanels();
+      game.notice = `${h.name}을(를) 내놓았어요.`; updateUI();
+    };
+    box.appendChild(sell);
+    return openPanel($('housePanel'));
+  }
+  if (other) {
+    btn.textContent = `${other.name} 님의 집이에요`;
+    btn.disabled = true;
+  } else if (cloudEnabled && !myUid()) {
+    btn.textContent = '로그인해야 살 수 있어요 (설정 → 계정)';
+    btn.onclick = () => { closePanels(); renderOpts(); openPanel($('setPanel')); };
+  } else if (save.homes.length) {
+    btn.textContent = '집은 한 사람당 한 채만 살 수 있어요';
+    btn.disabled = true;
+  } else {
+    btn.textContent = `${money(h.price)}에 사기 (가진 돈 ${money(save.money)})`;
+    btn.disabled = save.money < h.price;
+    btn.onclick = async () => {
+      if (save.money < h.price || houseOwned(h) || save.homes.length) return;
+      btn.disabled = true; btn.textContent = '사는 중…';
+      if (cloudEnabled) {
+        // 먼저 산 사람이 주인: Firebase 에 "내가 주인"이라고 적는 데 성공해야 살 수 있어요
+        try { await claimHouse(h.id, myUid(), cloud.user.name, h.defaultStyle); }
+        catch (e) {
+          game.notice = e.code === 'taken' ? '아쉬워요! 방금 다른 사람이 먼저 샀어요.' : '집을 사지 못했어요. 인터넷 연결이나 Firebase 보안 규칙을 확인해 주세요.';
+          if (e.code !== 'taken') console.warn('[집] 사기 실패', e);
+          closePanels(); updateUI(); return;
+        }
+      }
+      save.money -= h.price;
+      save.homes.push(h.id);
+      save.tanks[h.id] = [];
+      writeSave(); syncHouse(h); sfx.coin();
+      if (typeof flushCloudSave === 'function') flushCloudSave(); // 계정에도 바로 저장
+      closePanels();
+      game.notice = `${h.name}을(를) 샀어요! 이제 ${h.name}의 주인이에요. 문이 열렸어요.`;
+      updateUI();
+    };
+  }
+  box.appendChild(btn);
+  openPanel($('housePanel'));
+}
+// 어항 창: 위는 전시 중인 물고기(꺼내기), 아래는 가방 물고기(넣기)
+function renderTank() {
+  const h = tankHouse;
+  if (!h) return;
+  const list = $('tankList');
+  const tank = save.tanks[h.id] || (save.tanks[h.id] = []);
+  const slots = HOUSE_INFO[h.id].slots;
+  const row = (it, label, fn) => {
+    const r = document.createElement('div');
+    r.className = 'sellRow';
+    r.innerHTML = `<span class="nm">${mutHTML(it.mut) ? mutHTML(it.mut) + ' ' : ''}${esc(it.name)} <span style="color:#aaa;font-weight:400">${esc(fmtKg(it.weight))}</span></span><span class="pr">${money(it.price)}</span>`;
+    const b = document.createElement('button');
+    b.className = 'actBtn'; b.textContent = label; b.onclick = fn;
+    r.appendChild(b);
+    return r;
+  };
+  list.innerHTML = `<h3 class="chartH">어항 (${tank.length} / ${slots})</h3>`;
+  if (!tank.length) list.insertAdjacentHTML('beforeend', '<div class="count">아직 비어 있어요. 아래 가방에서 물고기를 넣어 보세요.</div>');
+  tank.forEach((it) => list.appendChild(row(it, '꺼내기', () => {
+    save.tanks[h.id] = save.tanks[h.id].filter((x) => x !== it);
+    save.inv.push(it);
+    writeSave(); rebuildTankFish(h); renderHotbar(); renderTank(); updateUI();
+  })));
+  list.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 (${save.inv.length}마리)</h3>`);
+  if (!save.inv.length) list.insertAdjacentHTML('beforeend', '<div class="count">가방에 물고기가 없어요.</div>');
+  for (let i = save.inv.length - 1; i >= 0; i--) {
+    const it = save.inv[i];
+    const r = row(it, '넣기', () => {
+      if ((save.tanks[h.id] || []).length >= slots) { game.notice = '어항이 꽉 찼어요. 하나 꺼내고 넣어요.'; updateUI(); return; }
+      if (game.selected === it.id) equip(null);
+      save.inv = save.inv.filter((x) => x !== it);
+      save.tanks[h.id].push(it);
+      writeSave(); rebuildTankFish(h); renderHotbar(); renderTank(); updateUI();
+    });
+    if (tank.length >= slots) r.querySelector('button').disabled = true;
+    list.appendChild(r);
+  }
+}
+// 어항 속 물고기 모형 다시 만들기 (어항 크기에 맞게 줄여요)
+function rebuildTankFish(h) {
+  for (const f of h.fish) scene.remove(f.model);
+  h.fish = [];
+  const T = h.tank;
+  for (const it of save.tanks[h.id] || []) {
+    const f = findFish(it.name);
+    if (!f) continue;
+    const model = makeFishModel(f, it.mut, it.weight);
+    const len = f.look.L * fishScale(f, it.weight);
+    model.scale.multiplyScalar(Math.min(1, 0.75 / Math.max(0.1, len))); // 어항에 쏙 들어가게
+    scene.add(model);
+    h.fish.push({ model, ph: Math.random() * 10, sp: 0.25 + Math.random() * 0.25, y: T.y + Math.random() * T.h, z: T.z + (Math.random() - 0.5) * T.d, flop: f.name === '물 만난 광어' });
+  }
+}
+// 섬 안내: 모래사장이나 바다에 있으면 화면 위에 가까운 섬 2곳의 방향(화살표)과 거리를 보여 줘요
+const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
+let islandHudAt = 0;
+function updateIslandHud(now) {
+  if (now - islandHudAt < 400) return;
+  islandHudAt = now;
+  const el = $('islandHud');
+  const p = person.position;
+  const show = p.z > 14 && !modalOpen();
+  if (!show) { if (!el.classList.contains('hidden')) el.classList.add('hidden'); return; }
+  const near = seaWorld.islands.map((it) => ({ it, d: Math.hypot(it.x - p.x, it.z - p.z) })).sort((a, b) => a.d - b.d);
+  const on = near[0].d < near[0].it.r;
+  // 안내는 정글섬만 (집 섬들은 안내에서 빼요)
+  const parts = near.filter((n) => n.it.id === 'jungle' && n.d >= n.it.r).map(({ it, d }) => {
+    // 카메라가 보는 쪽 기준으로 화살표 (↑ = 화면 앞쪽)
+    let a = Math.atan2(-(it.x - p.x), -(it.z - p.z)) - cam.yaw;
+    a = Math.atan2(Math.sin(a), Math.cos(a));
+    const k = ((Math.round(-a / (Math.PI / 4)) % 8) + 8) % 8;
+    return `${it.name} ${ARROWS[k]} ${Math.round(d)}m`;
+  });
+  const text = on ? `여기는 ${near[0].it.name}${parts.length ? ' · ' + parts.join(' · ') : ''}` : '섬 안내 · ' + parts.join(' · ');
+  if (el.textContent !== text) el.textContent = text;
+  el.classList.remove('hidden');
+}
+function updateHouses(t) {
+  for (const h of seaWorld.houses) {
+    // 집 안에 들어가면 지붕을 숨겨서 안이 보여요
+    const inside = h.inside(person.position.x, person.position.z);
+    if (h.roofGroup.visible === inside) h.roofGroup.visible = !inside;
+    if (inside) rainLines.visible = false; // 집 안에는 비가 안 와요
+    // 벽난로: 켜져 있으면 불꽃이 일렁이고, 집 안에 있을 땐 주황 불빛도 비춰요
+    h.fire.visible = h.fireOn;
+    if (h.fireOn) h.fire.children.forEach((f, i) => { f.scale.set(1, 0.8 + Math.sin(t * 9 + i * 2) * 0.25, 1); });
+    const want = h.fireOn && inside ? 3.5 + Math.sin(t * 7) * 0.6 : 0;
+    if (h.fireLight.intensity !== want) h.fireLight.intensity = want;
+    // 어항 물고기: 좌우로 왔다 갔다 헤엄쳐요
+    const T = h.tank;
+    for (const f of h.fish) {
+      const s = Math.sin(t * f.sp + f.ph);
+      f.model.position.set(T.x + s * T.w / 2, f.y + Math.sin(t * 1.3 + f.ph) * 0.08, f.z + Math.sin(t * 0.7 + f.ph) * 0.1);
+      f.model.rotation.set(0, Math.cos(t * f.sp + f.ph) > 0 ? 0 : Math.PI, f.flop ? Math.sin(t * 17) * 0.6 : Math.sin(t * 6 + f.ph) * 0.08);
+    }
+  }
+}
+seaWorld.houses.forEach(syncHouse);
+watchHouses(onHouseOwners); // 집 주인 목록 지켜보기 (누가 어느 집 주인인지)
+
 function updateShopBoats(t) {
   for (const b of shopBoats) { b.m.position.y = LAKE.y + Math.sin(t * 1.4 + b.ph) * 0.03; b.m.rotation.z = Math.sin(t * 1.1 + b.ph) * 0.03; }
   if (boat.group && !game.inBoat) placeBoat(t); // 세워 둔 보트도 살랑살랑

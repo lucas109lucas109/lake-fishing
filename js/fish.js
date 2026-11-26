@@ -132,18 +132,98 @@ FISH.push(
     look: { serpent: true, L: 3.0, h: 0.34, w: 0.3, color: 0x1a2a5a, belly: 0x7af0d0, fin: 0xb46cff, pc: 0x7affd0, iris: 0xff6ad8, glow: [0x7affd0, 0xb46cff, 0xff6ad8], size: 6.0 } }
 );
 
+// 오로라 강의 작고 싼 물고기들 — 거대한 물고기 사이사이에 자주 걸려요 (반짝반짝 예쁘지만 값은 싸요)
+FISH.push(
+  { name: '오로라 피라미', zone: 'aurora', rarity: 'common', w: [0.02, 0.1], perKg: 110,
+    look: { L: 0.6, h: 0.14, w: 0.08, color: 0x8af0d8, belly: 0xeafff8, fin: 0xc8a0ff, pattern: 'stripes', pc: 0xb48cff, iris: 0xe8fff8, size: 0.8 } },
+  { name: '별빛 송사리', zone: 'aurora', rarity: 'common', w: [0.03, 0.2], perKg: 80,
+    look: { L: 0.6, h: 0.2, w: 0.1, color: 0x3a4a8a, belly: 0xd8e0ff, fin: 0x6a7ad8, pattern: 'spots', pc: 0xfff6c8, glow: [0xfff6c8], size: 0.8 } },
+  { name: '얼음꽃 빙어', zone: 'aurora', rarity: 'common', w: [0.01, 0.05], perKg: 180,
+    look: { L: 0.55, h: 0.1, w: 0.07, color: 0xd8f4ff, belly: 0xffffff, fin: 0xa8e4ff, pattern: 'band', pc: 0x8ad0ff, smooth: true, size: 0.7 } },
+  { name: '청록 붕어', zone: 'aurora', rarity: 'common', w: [0.2, 1.5], perKg: 18,
+    look: { L: 0.75, h: 0.34, w: 0.14, color: 0x2a9a8a, belly: 0xc8f0e0, fin: 0x1a6a6a, iris: 0xe8fff0, size: 0.95 } },
+  { name: '물안개 미꾸라지', zone: 'aurora', rarity: 'common', w: [0.02, 0.08], perKg: 140,
+    look: { L: 0.65, h: 0.1, w: 0.09, color: 0x9aa8c8, belly: 0xe0e8f8, fin: 0x7a88a8, pattern: 'spots', pc: 0x5a6888, eel: true, whiskers: true, size: 0.75 } },
+  { name: '보랏빛 블루길', zone: 'aurora', rarity: 'common', w: [0.05, 0.4], perKg: 45,
+    look: { L: 0.6, h: 0.38, w: 0.12, color: 0x7a5aa8, belly: 0xffb0d8, fin: 0x5a3a88, pattern: 'stripes', pc: 0x4a2a78, gill: true, size: 0.85 } },
+  { name: '반딧불 금붕어', zone: 'aurora', rarity: 'uncommon', w: [0.1, 0.8], perKg: 55,
+    look: { L: 0.7, h: 0.36, w: 0.16, color: 0xffa84a, belly: 0xfff0c8, fin: 0xffe07a, iris: 0xffffff, pc: 0xfff6a0, glow: [0xfff6a0], blush: 0xff7a5a, size: 0.95 } },
+  { name: '눈송이 각시붕어', zone: 'aurora', rarity: 'uncommon', w: [0.02, 0.12], perKg: 240,
+    look: { L: 0.55, h: 0.3, w: 0.1, color: 0xf0f6ff, belly: 0xffffff, fin: 0xff9ad8, pattern: 'spots', pc: 0xb8e0ff, iris: 0x5ab8ff, size: 0.8 } },
+  { name: '무지갯빛 꺽지', zone: 'aurora', rarity: 'uncommon', w: [0.05, 0.4], perKg: 70,
+    look: { L: 0.7, h: 0.3, w: 0.14, color: 0x4a6a9a, belly: 0xd8e8ff, fin: 0xff8ad8, pattern: 'stripes', pc: 0x7affd0, gill: true, tallDorsal: true, size: 0.85 } }
+);
+
+// =========== 풍차 뒤 큰 바다 (zone: 'sea') — 바다에만 사는 물고기들 ===========
+FISH.push(
+  { name: '고등어', zone: 'sea', rarity: 'common', w: [0.3, 1.5], perKg: 20,
+    look: { L: 0.95, h: 0.22, w: 0.13, color: 0x2a6a8a, belly: 0xeef2f4, fin: 0x3a5a6a, pattern: 'stripes', pc: 0x1a3a4a, size: 1.0 } },
+  { name: '전갱이', zone: 'sea', rarity: 'common', w: [0.1, 0.6], perKg: 30,
+    look: { L: 0.8, h: 0.24, w: 0.12, color: 0x8aa0a8, belly: 0xf0f4f4, fin: 0xd8c050, pattern: 'band', pc: 0xd8c050, size: 0.9 } },
+  { name: '학꽁치', zone: 'sea', rarity: 'common', w: [0.05, 0.3], perKg: 70,
+    look: { L: 0.9, h: 0.1, w: 0.08, color: 0x6a9ab8, belly: 0xf4f8fa, fin: 0x5a8aa8, snout: true, smooth: true, size: 0.9 } },
+  { name: '우럭', zone: 'sea', rarity: 'common', w: [0.3, 2], perKg: 25,
+    look: { L: 0.85, h: 0.34, w: 0.18, color: 0x4a4440, belly: 0x9a928a, fin: 0x3a3430, pattern: 'blotch', pc: 0x2a2420, bigMouth: true, gill: true, size: 1.0 } },
+  { name: '참돔', zone: 'sea', rarity: 'uncommon', w: [0.5, 6], perKg: 35,
+    look: { L: 0.95, h: 0.42, w: 0.16, color: 0xe86a7a, belly: 0xffe0e4, fin: 0xd84a5a, pattern: 'spots', pc: 0x7ad0ff, tallDorsal: true, size: 1.1 } },
+  { name: '방어', zone: 'sea', rarity: 'uncommon', w: [2, 12], perKg: 14,
+    look: { L: 1.2, h: 0.3, w: 0.18, color: 0x3a5a7a, belly: 0xf0f0ec, fin: 0xe8c840, pattern: 'band', pc: 0xe8c840, size: 1.4 } },
+  { name: '쥐치', zone: 'sea', rarity: 'uncommon', w: [0.2, 1], perKg: 60,
+    look: { L: 0.75, h: 0.42, w: 0.1, color: 0xb8a070, belly: 0xe8dcc0, fin: 0xa88a50, pattern: 'blotch', pc: 0x7a6440, tallDorsal: true, size: 0.95 } },
+  { name: '줄무늬 다랑어', zone: 'sea', rarity: 'rare', w: [5, 30], perKg: 10,
+    look: { L: 1.5, h: 0.42, w: 0.32, color: 0x24406a, belly: 0xe8ecf0, fin: 0x5a6c84, pc: 0xf2c230, tuna: true, size: 1.9 } },
+  { name: '흑점 가오리', zone: 'sea', rarity: 'rare', w: [10, 60], perKg: 5,
+    look: { ray: true, L: 1.0, h: 0.12, w: 1.2, color: 0x5a4a3a, belly: 0xf0ece4, fin: 0x4a3a2a, pc: 0x1a1410, size: 2.6 } },
+  { name: '청새치', zone: 'sea', rarity: 'rare', w: [30, 150], perKg: 6,
+    look: { L: 1.7, h: 0.32, w: 0.22, color: 0x1a3a6a, belly: 0xe0e8f0, fin: 0x2a4a8a, snout: true, pattern: 'stripes', pc: 0x6ab0ff, smooth: true, size: 3.2 } },
+  { name: '돛새치', zone: 'sea', rarity: 'legendary', w: [40, 100], perKg: 9,
+    look: { L: 1.7, h: 0.3, w: 0.2, color: 0x1a4a8a, belly: 0xe8f0f8, fin: 0x3a6ad8, snout: true, longDorsal: true, tallDorsal: true, pattern: 'spots', pc: 0x8ad8ff, smooth: true, size: 3.4 } },
+  { name: '백상아리', zone: 'sea', rarity: 'legendary', w: [300, 1100], perKg: 2.4,
+    look: { L: 2.0, h: 0.44, w: 0.4, color: 0x6a7a86, belly: 0xf4f4f0, fin: 0x5a6a76, bigHead: true, bigMouth: true, smooth: true, size: 6.0 } },
+  { name: '바다의 왕 범고래', zone: 'sea', rarity: 'mythic', w: [2000, 5000], perKg: 1.6, huge: true,
+    look: { L: 2.2, h: 0.55, w: 0.5, color: 0x141418, belly: 0xf6f6f6, fin: 0x101014, bigHead: true, smooth: true, tallDorsal: true, pattern: 'band', pc: 0xf6f6f6, iris: 0xffffff, size: 7.5 } }
+);
+
+// =========== 정글섬 연못 (zone: 'jungle') — 후반 콘텐츠! 정글 공방 낚싯대로만 낚여요. 아주 비싸요 ===========
+FISH.push(
+  { name: '에메랄드 피라냐', zone: 'jungle', rarity: 'common', w: [0.5, 3], perKg: 2500,
+    look: { L: 0.75, h: 0.4, w: 0.16, color: 0x2ab86a, belly: 0xff5a3a, fin: 0x1a8a4a, bigMouth: true, iris: 0xffe23a, pattern: 'spots', pc: 0x8affc8, glow: [0x8affc8], size: 1.0 } },
+  { name: '정글 아로와나', zone: 'jungle', rarity: 'common', w: [1, 6], perKg: 1500,
+    look: { L: 1.3, h: 0.26, w: 0.14, color: 0xd8a83a, belly: 0xfff0c0, fin: 0xff7a2a, pattern: 'scales', pc: 0xffd84a, whiskers: true, longDorsal: true, smooth: true, size: 1.3 } },
+  { name: '무지개 디스커스', zone: 'jungle', rarity: 'uncommon', w: [0.3, 1.5], perKg: 9000,
+    look: { L: 0.7, h: 0.62, w: 0.1, color: 0x3ab8ff, belly: 0xffe07a, fin: 0xff6ab0, rainbow: true, smooth: true, iris: 0xff3a3a, size: 1.1 } },
+  { name: '황금 비단잉어', zone: 'jungle', rarity: 'uncommon', w: [2, 10], perKg: 2000,
+    look: { L: 1.15, h: 0.38, w: 0.2, color: 0xffc83a, belly: 0xfff4d0, fin: 0xffe07a, whiskers: true, pattern: 'blotch', pc: 0xd8402a, iris: 0xffffff, glow: [0xffe07a], size: 1.3 } },
+  { name: '덩굴 장어', zone: 'jungle', rarity: 'rare', w: [3, 15], perKg: 3000,
+    look: { eel: true, L: 1.6, h: 0.16, w: 0.13, color: 0x2a6a2a, belly: 0xb8e88a, fin: 0x6ad84a, longDorsal: true, pattern: 'stripes', pc: 0x1a4a1a, iris: 0xffe23a, size: 1.6 } },
+  { name: '아마존 피라루쿠 왕', zone: 'jungle', rarity: 'rare', w: [60, 200], perKg: 400,
+    look: { L: 1.8, h: 0.38, w: 0.32, color: 0x3a4a3a, belly: 0xd8c8a8, fin: 0xd83a2a, pattern: 'scales', pc: 0xd83a2a, crown: true, size: 4.0 } },
+  { name: '신전의 수호 메기', zone: 'jungle', rarity: 'legendary', w: [30, 120], perKg: 1500,
+    look: { L: 1.4, h: 0.28, w: 0.28, color: 0x4a5a4a, belly: 0x9aa88a, fin: 0x3a4a3a, whiskers: true, longWhisk: true, smooth: true, crystals: 0x6affb0, iris: 0x6affb0, glow: [0x6affb0], size: 2.6 } },
+  { name: '태양 신의 물고기', zone: 'jungle', rarity: 'legendary', w: [5, 20], perKg: 12000,
+    look: { L: 1.0, h: 0.4, w: 0.18, color: 0xffd84a, belly: 0xfff6c0, fin: 0xff8a2a, tallDorsal: true, crown: true, iris: 0xffffff, glow: [0xffd84a, 0xff8a2a], size: 1.8 } },
+  { name: '고대 정글 용', zone: 'jungle', rarity: 'mythic', w: [500, 1500], perKg: 800, huge: true,
+    look: { serpent: true, L: 3.0, h: 0.36, w: 0.32, color: 0x1a5a3a, belly: 0xd8f0a0, fin: 0xffc83a, pc: 0x6affb0, iris: 0xff3a3a, glow: [0x6affb0, 0xffc83a], size: 6.5 } }
+);
+
 // 물고기가 사는 곳: 'lake'(큰 호수·개울) 또는 'mountain'(산 위 연못)
 export const zoneOf = (f) => f.zone || 'lake';
 
 // 이로치 (색이 다른 특별한 물고기)
 // chance = 붙을 확률, mult = 가격 배율, tint = 바뀌는 색
+//  (확률은 예전보다 살짝 낮췄어요. 얼음·방사능·글리치가 새로 생겼어요)
 export const MUTATIONS = [
-  { name: '골드',   color: '#ffcf3f', chance: 0.10, mult: 2.0, tint: 0xffd84a, mix: 0.88, metal: 0.3, rough: 0.3, glow: 0xb08000, gi: 0.45 },
-  { name: '다크',   color: '#a07cff', chance: 0.06, mult: 2.5, tint: 0x1c1428, mix: 0.85, metal: 0.2, rough: 0.4, glow: 0x5a2aa8, gi: 0.45 },
-  { name: '화이트', color: '#f4f4f4', chance: 0.05, mult: 3.0, tint: 0xf6f6f2, mix: 0.85, metal: 0.05, rough: 0.5, glow: 0x000000, gi: 0 },
-  { name: '핏빛',   color: '#ff4a4a', chance: 0.03, mult: 4.0, tint: 0x9a0f18, mix: 0.8, metal: 0.2, rough: 0.35, glow: 0x8a0010, gi: 0.4 },
-  { name: '알비노', color: '#ffc4d0', chance: 0.02, mult: 6.0, tint: 0xffe6ea, mix: 0.88, metal: 0, rough: 0.5, glow: 0x000000, gi: 0, eye: 0xd8202a },
-  { name: '다이아', color: '#9ff3ff', chance: 0.01, mult: 10.0, tint: 0xd8faff, mix: 0.85, metal: 0.2, rough: 0.05, glow: 0x3ad8ff, gi: 0.5, clear: true }
+  { name: '골드',   color: '#ffcf3f', chance: 0.07, mult: 2.0, tint: 0xffd84a, mix: 0.88, metal: 0.3, rough: 0.3, glow: 0xb08000, gi: 0.45 },
+  { name: '다크',   color: '#a07cff', chance: 0.045, mult: 2.5, tint: 0x1c1428, mix: 0.85, metal: 0.2, rough: 0.4, glow: 0x5a2aa8, gi: 0.45 },
+  { name: '화이트', color: '#f4f4f4', chance: 0.035, mult: 3.0, tint: 0xf6f6f2, mix: 0.85, metal: 0.05, rough: 0.5, glow: 0x000000, gi: 0 },
+  // 얼음: 몸 색은 살짝 푸르게만 바꾸고, 겉을 투명한 얼음 껍질이 감싸요 (+ 등에 고드름 결정)
+  { name: '얼음',   color: '#aee9ff', chance: 0.03, mult: 3.5, tint: 0xb8e8ff, mix: 0.45, metal: 0.1, rough: 0.3, glow: 0x3a8ab8, gi: 0.15, ice: true },
+  { name: '핏빛',   color: '#ff4a4a', chance: 0.022, mult: 4.0, tint: 0x9a0f18, mix: 0.8, metal: 0.2, rough: 0.35, glow: 0x8a0010, gi: 0.4 },
+  { name: '알비노', color: '#ffc4d0', chance: 0.014, mult: 6.0, tint: 0xffe6ea, mix: 0.88, metal: 0, rough: 0.5, glow: 0x000000, gi: 0, eye: 0xd8202a },
+  { name: '방사능', color: '#7dff3a', chance: 0.01, mult: 7.0, tint: 0x6aff2a, mix: 0.8, metal: 0.1, rough: 0.4, glow: 0x3aff1a, gi: 0.95 },
+  { name: '다이아', color: '#9ff3ff', chance: 0.007, mult: 10.0, tint: 0xd8faff, mix: 0.85, metal: 0.2, rough: 0.05, glow: 0x3ad8ff, gi: 0.5, clear: true },
+  // 글리치: 화면이 고장 난 것처럼 블록마다 분홍·하늘·검정·하양이 뒤죽박죽 (12배!)
+  { name: '글리치', color: '#ff3ad8', chance: 0.004, mult: 12.0, tint: 0xff2ad8, mix: 0.9, metal: 0.3, rough: 0.3, glow: 0xff2ad8, gi: 0.7, glitch: [0xff2ad8, 0x2affff, 0x15101c, 0xffffff, 0x7a2aff] }
 ];
 
 export function findFish(name) {
@@ -152,15 +232,16 @@ export function findFish(name) {
 export function findMut(name) {
   return MUTATIONS.find((m) => m.name === name) || null;
 }
-// 이로치는 최대 2개까지 겹쳐요. 저장할 땐 "골드+다이아" 처럼 + 로 이어서 적어요.
+// 이로치는 최대 3개까지 겹쳐요. 저장할 땐 "골드+다이아" 처럼 + 로 이어서 적어요.
 // 문자열을 이로치 목록으로 바꿔요 (없는 이름, 중복, 3개 이상은 버려요)
+export const MAX_MUTS = 3;
 export function mutList(str) {
   if (typeof str !== 'string' || !str) return [];
   const out = [];
   for (const n of str.split('+')) {
     const m = findMut(n);
     if (m && !out.includes(m)) out.push(m);
-    if (out.length === 2) break;
+    if (out.length === MAX_MUTS) break;
   }
   return out;
 }
@@ -188,13 +269,22 @@ export function rollFish(luck, zone = 'lake', rain = false) {
   }
   return rollNormal(luck, zone);
 }
+// 희귀도별 확률 (합치면 1). 운이 높을수록 흔한 건 줄고 귀한 건 늘어요.
+// 운이 아무리 높아도 마이너스가 되거나 100%를 넘지 않게, 무게를 매긴 다음 나눠서 비율로 만들어요.
+const RARITY_BASE = { common: 0.55, uncommon: 0.25, rare: 0.14, legendary: 0.05, mythic: 0.01 };
+const RARITY_LUCK = { uncommon: 0.8, rare: 2, legendary: 3, mythic: 4 }; // 운 1 당 얼마나 늘어나는지
+export function rarityOdds(luck) {
+  const L = Math.max(0, luck);
+  const w = {};
+  for (const [k, b] of Object.entries(RARITY_BASE)) w[k] = k === 'common' ? b * Math.max(0.15, 1 - L * 0.9) : b * (1 + L * RARITY_LUCK[k]);
+  const sum = Object.values(w).reduce((a, b) => a + b, 0);
+  for (const k in w) w[k] /= sum;
+  return w;
+}
 function rollNormal(luck, zone) {
-  const r = Math.random();
-  const rarity =
-    r < 0.55 - luck ? 'common' :
-    r < 0.8 - luck * 0.7 ? 'uncommon' :
-    r < 0.94 - luck * 0.3 ? 'rare' :
-    r < 0.99 - luck * 0.05 ? 'legendary' : 'mythic';
+  const odds = rarityOdds(luck);
+  let r = Math.random(), rarity = 'mythic';
+  for (const [k, v] of Object.entries(odds)) { if (r < v) { rarity = k; break; } r -= v; }
   // 비 물고기(weather)는 평소에는 안 나와요
   let pool = FISH.filter((f) => f.rarity === rarity && zoneOf(f) === zone && !f.weather);
   if (!pool.length) pool = FISH.filter((f) => zoneOf(f) === zone && !f.weather);
@@ -206,24 +296,28 @@ function makeCatch(f, luck) {
   let weight = f.w[0] + (f.w[1] - f.w[0]) * Math.pow(Math.random(), 1.8);
   weight = weight < 1 ? Math.round(weight * 1000) / 1000 : Math.round(weight * 10) / 10;
   // 이로치: 귀한 것부터 차례로 확률을 쌓아서 하나 골라요 (골드 10% 가 제일 흔해요)
-  // 하나가 붙으면, 절반 확률로 한 번 더 굴려서 두 번째 이로치가 겹칠 수 있어요
+  // 하나가 붙으면 절반 확률로 두 번째, 또 붙으면 1/4 확률로 세 번째 이로치까지 겹칠 수 있어요
   const boost = 1 + luck * 1.5;
   const pick = (scale, except) => {
     const roll = Math.random();
     let acc = 0;
     for (const m of [...MUTATIONS].reverse()) {
-      if (m === except) continue;
+      if (except.includes(m)) continue;
       acc += m.chance * boost * scale;
       if (roll < acc) return m;
     }
     return null;
   };
   const muts = [];
-  const m1 = pick(1, null);
+  const m1 = pick(1, []);
   if (m1) {
     muts.push(m1);
-    const m2 = pick(0.5, m1);
-    if (m2) muts.push(m2);
+    const m2 = pick(0.5, muts);
+    if (m2) {
+      muts.push(m2);
+      const m3 = pick(0.25, muts);
+      if (m3) muts.push(m3);
+    }
   }
   const mut = muts.map((m) => m.name).join('+') || null;
   const price = priceOf(f, weight, mut);
@@ -249,12 +343,17 @@ const shade = (c, k) => {
   return col.getHex();
 };
 // weight 를 주면 같은 물고기라도 무거울수록 더 크게 보여요
+// 얼음 이로치용 재질 (모든 물고기가 같이 써요)
+const ICE_MAT = new THREE.MeshStandardMaterial({ color: 0xd8f6ff, transparent: true, opacity: 0.42, roughness: 0.05, metalness: 0.15, emissive: 0x6ac8ff, emissiveIntensity: 0.18, depthWrite: false });
+const ICE_CRYSTAL = new THREE.MeshStandardMaterial({ color: 0xe8fbff, transparent: true, opacity: 0.85, roughness: 0.05, metalness: 0.2, emissive: 0x8ad8ff, emissiveIntensity: 0.5 });
 export function makeFishModel(f, mutName, weight) {
   const o = f.look;
   const L = o.L, H = o.h, W = o.w;
   const g = new THREE.Group();
-  // 이로치가 1개면 몸 전체가 그 색, 2개면 머리 쪽 절반(+x)은 첫 번째, 꼬리 쪽 절반은 두 번째 색
+  // 이로치가 1개면 몸 전체가 그 색, 2개면 머리 쪽 절반(+x)은 첫 번째·꼬리 쪽 절반은 두 번째,
+  // 3개면 머리·가운데·꼬리 세 칸으로 나눠 칠해요
   const muts = mutList(mutName);
+  let iced = false; // 얼음 껍질을 씌운 블록이 있으면 true (등에 고드름을 달아요)
 
   const piece = (w, h, d, c, x, y, z, rx, ry, rz, mut) => {
     let color = new THREE.Color(c);
@@ -264,11 +363,13 @@ export function makeFishModel(f, mutName, weight) {
     // 유령·해파리처럼 몸이 비쳐 보이는 물고기
     if (o.ghost && c !== EYE && c !== SHINE) Object.assign(params, { transparent: true, opacity: o.ghost, depthWrite: false });
     if (mut && c !== SHINE && c !== SCLERA) {
+      // 글리치는 블록마다 아무 색이나 골라요 (고장 난 화면처럼)
+      const tint = mut.glitch ? mut.glitch[Math.floor(Math.random() * mut.glitch.length)] : mut.tint;
       if (c === EYE) color = new THREE.Color(mut.eye ?? EYE);
-      else color.lerp(new THREE.Color(mut.tint), mut.mix); // 이로치는 몸 색이 통째로 바뀌어요
+      else color.lerp(new THREE.Color(tint), mut.mix); // 이로치는 몸 색이 통째로 바뀌어요
       Object.assign(params, {
         color, metalness: mut.metal, roughness: mut.rough,
-        emissive: new THREE.Color(mut.glow), emissiveIntensity: mut.gi
+        emissive: new THREE.Color(mut.glitch ? tint : mut.glow), emissiveIntensity: mut.gi
       });
       if (mut.clear) Object.assign(params, { transparent: true, opacity: 0.82 });
     }
@@ -276,18 +377,30 @@ export function makeFishModel(f, mutName, weight) {
     m.position.set(x, y, z);
     m.rotation.set(rx, ry, rz);
     m.castShadow = true;
+    if (mut) m.userData.mut = mut.name; // 이펙트에서 써요 (어느 이로치 칸인지)
     g.add(m);
+    // 얼음 이로치: 블록마다 조금 더 큰 투명 얼음 껍질을 씌워요 (반짝반짝 차가워 보이게)
+    if (mut && mut.ice && c !== SHINE) {
+      const pad = Math.max(0.02, Math.min(w, h, d) * 0.18);
+      const shell = new THREE.Mesh(new THREE.BoxGeometry(w + pad, h + pad, d + pad), ICE_MAT);
+      shell.castShadow = false;
+      m.add(shell);
+      iced = true;
+    }
     return m;
   };
   const add = (w, h, d, c, x, y, z, rx = 0, ry = 0, rz = 0) => {
     if (muts.length < 2) return piece(w, h, d, c, x, y, z, rx, ry, rz, muts[0]);
-    // 두 색: 가운데(x=0)를 걸치는 블록은 둘로 잘라서 반반 칠해요
-    const x0 = x - w / 2, x1 = x + w / 2;
-    if (!rx && !ry && !rz && x0 < 0 && x1 > 0) {
-      piece(x1, h, d, c, x1 / 2, y, z, 0, 0, 0, muts[0]);
-      return piece(-x0, h, d, c, x0 / 2, y, z, 0, 0, 0, muts[1]);
+    // 여러 색: 경계선(2개면 x=0, 3개면 x=±L/6)을 걸치는 블록은 잘라서 칸마다 칠해요
+    const cuts = muts.length === 2 ? [0] : [L / 6, -L / 6]; // 머리 쪽(+x)부터
+    const segOf = (px) => { let i = 0; while (i < cuts.length && px < cuts[i]) i++; return muts[i]; };
+    if (rx || ry || rz) return piece(w, h, d, c, x, y, z, rx, ry, rz, segOf(x));
+    let hi = x + w / 2, last;
+    const lo = x - w / 2;
+    for (const cut of cuts) {
+      if (cut < hi && cut > lo) { last = piece(hi - cut, h, d, c, (hi + cut) / 2, y, z, 0, 0, 0, segOf((hi + cut) / 2)); hi = cut; }
     }
-    return piece(w, h, d, c, x, y, z, rx, ry, rz, x >= 0 ? muts[0] : muts[1]);
+    return piece(hi - lo, h, d, c, (hi + lo) / 2, y, z, 0, 0, 0, segOf((hi + lo) / 2)) || last;
   };
 
   // 눈: 흰자(또는 눈 색) + 검은 눈동자 + 반짝이. side 방향(±z)으로 붙여요
@@ -641,7 +754,25 @@ export function makeFishModel(f, mutName, weight) {
       add(L * 0.05, H * 0.12, W * 0.35, 0xff5a8a, L * 0.62, -H * 0.36, 0, 0, 0, -0.5);
     }
   }
+  // 얼음 이로치: 등 위에 뾰족한 얼음 결정 몇 개 + 배 아래 고드름
+  if (iced) {
+    for (let k = 0; k < 4; k++) {
+      const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.05 + (k % 2) * 0.025, 0), ICE_CRYSTAL);
+      c.scale.y = 2.4;
+      c.position.set(-L * 0.3 + k * L * 0.18, H * 0.55 + 0.04, (k % 2 ? 1 : -1) * W * 0.15);
+      c.rotation.z = (k % 2 ? 0.3 : -0.3);
+      g.add(c);
+    }
+    for (let k = 0; k < 3; k++) {
+      const ic = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 4), ICE_CRYSTAL);
+      ic.rotation.x = Math.PI;
+      ic.position.set(-L * 0.15 + k * L * 0.15, -H * 0.5 - 0.05, 0);
+      g.add(ic);
+    }
+  }
   g.scale.setScalar(fishScale(f, weight));
+  g.userData.dynamic = true; // 물고기는 움직여요 (최적화에서 빼요)
+  if (muts.length) addFishFx(g, muts, L, H, W);
   return g;
 }
 
@@ -651,4 +782,94 @@ export function fishScale(f, weight) {
   if (weight === undefined) return base;
   const k = Math.min(1, Math.max(0, (weight - f.w[0]) / (f.w[1] - f.w[0])));
   return base * (0.85 + 0.45 * k);
+}
+
+
+// =====================================================
+//  이로치 이펙트 (은은하게): 만든 물고기 모형을 기억해 두고, 매 장면 updateFishFx 로 움직여요
+//   글리치 = 블록이 지직지직 튀고 깜빡 · 골드/다이아/화이트/얼음 = 반짝이 · 방사능 = 초록 맥박
+//   다크 = 보랏빛 알갱이가 맴돌기 · 핏빛 = 가끔 붉은 방울 · 알비노 = 은은한 빛
+// =====================================================
+const FX = new Set();
+const SPARK_GEO = new THREE.OctahedronGeometry(0.035, 0);
+const fxMat = (c, o = 1) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthWrite: false });
+const SPARK = { 골드: fxMat(0xfff2a0), 다이아: fxMat(0xe8fdff), 화이트: fxMat(0xffffff), 얼음: fxMat(0xcff4ff), 다크: fxMat(0x6a3aa8, 0.8), 핏빛: fxMat(0xc8101a, 0.9) };
+function addFishFx(g, muts, L, H, W) {
+  const names = muts.map((m) => m.name);
+  const pieces = [];
+  g.traverse((o) => { if (o.isMesh && o.userData.mut) { o.userData.base0 = o.position.clone(); pieces.push(o); } });
+  const fx = { names, pieces, L, H, W, parts: [], glitchUntil: 0, seen: false };
+  // 반짝이 / 알갱이 / 방울 조각 미리 만들기 (작은 것 몇 개만)
+  for (const n of names) {
+    const count = n === '다크' ? 5 : n === '핏빛' ? 2 : SPARK[n] ? 3 : 0;
+    for (let k = 0; k < count; k++) {
+      const p = new THREE.Mesh(SPARK_GEO, SPARK[n]);
+      p.visible = false;
+      p.userData = { kind: n, ph: Math.random() * 10, t0: 0 };
+      g.add(p);
+      fx.parts.push(p);
+    }
+  }
+  g.userData.fx = fx;
+  FX.add(g);
+}
+export function updateFishFx(t) {
+  for (const g of FX) {
+    const fx = g.userData.fx;
+    if (!fx) { FX.delete(g); continue; } // 이펙트 정보가 없어졌으면 그냥 빼요 (게임이 멈추지 않게)
+    if (!g.parent) { if (fx.seen) FX.delete(g); continue; } // 화면에서 사라진 물고기는 잊어요
+    fx.seen = true;
+    const { names, pieces, L, H, W } = fx;
+    // 글리치: 가끔 몇 블록이 옆으로 튀고/사라졌다가 금방 돌아와요
+    if (names.includes('글리치')) {
+      if (t > fx.glitchUntil) {
+        for (const p of pieces) { p.position.copy(p.userData.base0); p.visible = true; }
+        g.userData.gx = 0;
+        if (Math.random() < 0.06) {
+          fx.glitchUntil = t + 0.05 + Math.random() * 0.09;
+          const n = 1 + Math.floor(Math.random() * 4);
+          for (let k = 0; k < n; k++) {
+            const p = pieces[Math.floor(Math.random() * pieces.length)];
+            if (!p || p.userData.mut !== '글리치') continue;
+            if (Math.random() < 0.3) p.visible = false;
+            else p.position.x += (Math.random() - 0.5) * L * 0.25, p.position.y += (Math.random() - 0.5) * H * 0.3;
+          }
+        }
+      }
+    }
+    // 방사능: 초록 빛이 숨 쉬듯 / 알비노: 아주 은은하게
+    if (names.includes('방사능') || names.includes('알비노')) {
+      const k = 0.55 + Math.sin(t * 4) * 0.4;
+      for (const p of pieces) {
+        if (p.userData.mut === '방사능') p.material.emissiveIntensity = 0.5 + k * 0.8;
+        else if (p.userData.mut === '알비노') p.material.emissiveIntensity = 0.06 + k * 0.08;
+      }
+      for (const p of pieces) if (p.userData.mut === '알비노' && p.material.emissive.getHex() === 0) p.material.emissive.set(0xffd8e0);
+    }
+    // 반짝이 · 알갱이 · 방울
+    for (const p of fx.parts) {
+      const u = p.userData;
+      if (u.kind === '다크') { // 몸 주위를 천천히 맴도는 보랏빛 알갱이
+        const a = t * 0.9 + u.ph;
+        p.visible = true;
+        p.position.set(Math.cos(a) * L * 0.55, Math.sin(t * 1.3 + u.ph) * H * 0.5, Math.sin(a) * (W + 0.15));
+        p.scale.setScalar(0.7 + Math.sin(t * 3 + u.ph) * 0.3);
+        continue;
+      }
+      if (u.kind === '핏빛') { // 가끔 아래로 똑 떨어지는 방울
+        const q = ((t * 0.35 + u.ph) % 1);
+        p.visible = q < 0.35;
+        p.position.set((u.ph % 1 - 0.5) * L * 0.6, -H * 0.4 - q * 0.9, 0);
+        p.scale.set(0.6, 1.0, 0.6);
+        continue;
+      }
+      // 반짝이: 몸 여기저기에서 생겼다가 사라져요
+      const q = ((t * 0.7 + u.ph) % 1);
+      if (q < 0.02 || !u.set) { u.set = true; p.position.set((Math.random() - 0.5) * L, (Math.random() - 0.3) * H, (Math.random() - 0.5) * (W + 0.1)); }
+      p.visible = q < 0.4;
+      const s = Math.sin((q / 0.4) * Math.PI);
+      p.scale.setScalar(Math.max(0.01, s));
+      p.rotation.set(t * 3, t * 2, 0);
+    }
+  }
 }

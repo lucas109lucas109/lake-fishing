@@ -11,7 +11,9 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #eca77c; }
 body {
-  font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  font-family: "Jua", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  font-synthesis: none; /* 주아체는 굵기가 하나라, 가짜 굵게(번짐)를 안 쓰게 */
+  letter-spacing: 0.2px;
   color: var(--text);
   user-select: none;
   -webkit-user-select: none;
@@ -354,3 +356,37 @@ body.locked canvas { cursor: none; }
   #dressPanel.modal.side { place-items: end center; }
   #dressPanel.modal.side .modalBox { width: 100%; max-height: 46vh; }
 }
+/* 그래픽 가속이 꺼져 있을 때 화면 위에 뜨는 안내 띠 */
+#gpuWarn { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 50; max-width: min(720px, calc(100% - 32px)); background: #c0392b; color: #fff; font-weight: 800; font-size: 14px; padding: 10px 14px; border-radius: 0 0 10px 10px; cursor: pointer; box-shadow: 0 4px 16px #0006; }
+
+/* 집 디자인 고르기 카드 */
+.designGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.designCard { background: #2b2440; border: 2px solid var(--line); border-radius: 10px; padding: 8px; color: #eee; font: inherit; cursor: pointer; text-align: left; }
+.designCard.on { border-color: #ffd36b; box-shadow: 0 0 0 2px #ffd36b55; }
+.designCard .dsw { display: flex; gap: 4px; margin-bottom: 6px; }
+.designCard .dsw i { flex: 1; height: 22px; border-radius: 5px; border: 1px solid #0006; }
+.designCard .dnm { font-weight: 900; font-size: 14px; }
+.designCard .dst { font-size: 12px; color: var(--sub); margin-top: 2px; }
+.designCard.on .dst { color: #ffd36b; }
+/* 섬 안내 (모래사장·바다에서 화면 위 가운데) */
+#islandHud { position: fixed; top: 66px; left: 50%; transform: translateX(-50%); background: #1f1a2bcc; color: #fff; font-weight: 800; font-size: 14px; padding: 6px 12px; border-radius: 999px; pointer-events: none; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; z-index: 5; }
+
+/* 침대에서 잘 때 화면이 잠깐 깜깜해져요 */
+#sleepFade { position: fixed; inset: 0; background: #05040a; opacity: 0; pointer-events: none; transition: opacity 0.6s; z-index: 40; }
+#sleepFade.on { opacity: 1; }
+
+/* 긴 설명 글은 부드러운 고운돋움 (읽기 편하게) */
+.ds, .count, .modalBox .count, #cookList .count, .fishNames { font-family: "Gowun Dodum", "Malgun Gothic", sans-serif; }
+
+/* 글리치의 날: 화면 위 안내 + 은은한 줄무늬 + 가끔 색이 어긋나는 지직 */
+#glitchHud { position: fixed; top: 100px; left: 50%; transform: translateX(-50%); background: #14061acc; color: #ff6ae8; font-size: 15px; padding: 6px 14px; border-radius: 8px; pointer-events: none; z-index: 6; text-shadow: 2px 0 #2affff, -2px 0 #ff2ad8; animation: glitchText 1.6s infinite steps(1); white-space: nowrap; }
+@keyframes glitchText { 0%, 86%, 100% { transform: translateX(-50%); } 88% { transform: translateX(calc(-50% + 4px)) skewX(8deg); } 92% { transform: translateX(calc(-50% - 5px)); } 95% { transform: translateX(-50%) skewX(-6deg); } }
+#glitchFx { position: fixed; inset: 0; pointer-events: none; z-index: 3; opacity: 0; transition: opacity 1s;
+  background: repeating-linear-gradient(0deg, rgba(255, 42, 216, 0.05) 0 2px, transparent 2px 5px); mix-blend-mode: screen; }
+body.glitchDay #glitchFx { opacity: 1; animation: glitchScreen 3.2s infinite steps(1); }
+@keyframes glitchScreen { 0%, 90%, 100% { transform: none; filter: none; } 91% { transform: translateX(6px); filter: hue-rotate(90deg); } 93% { transform: translateX(-4px) scaleY(1.01); } 95% { transform: none; filter: hue-rotate(-60deg); } }
+body.glitchDay canvas { animation: glitchCanvas 5s infinite steps(1); }
+@keyframes glitchCanvas { 0%, 96%, 100% { filter: none; } 97% { filter: hue-rotate(40deg) saturate(1.4); } 98.5% { filter: contrast(1.2) hue-rotate(-30deg); } }
+
+/* 낚싯대 특기 한 줄 */
+.perk { font-size: 12px; color: #ffd36b; margin: 1px 0 3px; font-family: "Gowun Dodum", sans-serif; }

@@ -1,0 +1,10 @@
+# GitHub 에 올리지 않을 것들
+# 노래 파일은 저작권 때문에 공개 저장소에 올리지 않아요 (내 컴퓨터에서만 나와요)
+music/*.mp3
+music/*.ogg
+music/*.m4a
+node_modules/
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store

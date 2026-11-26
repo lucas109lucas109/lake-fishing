@@ -124,15 +124,32 @@ button { font-family: inherit; cursor: pointer; }
 }
 #status { font-size: 17px; font-weight: 900; }
 /* NPC 대사 한 줄: "이름: 멘트" (예쁜 글씨체) */
+/* NPC 대화창: 노을빛 테두리의 큰 말풍선 */
 #talkLine {
+  position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%);
+  width: min(640px, calc(100% - 32px)); box-sizing: border-box;
+  padding: 26px 26px 18px; z-index: 6; pointer-events: none;
   font-family: "Gowun Dodum", "Malgun Gothic", sans-serif;
-  font-size: 20px; margin-bottom: 6px; color: #fff8ee;
-  text-shadow: 0 0 4px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
-  animation: talkIn 0.25s ease-out;
+  font-size: 22px; line-height: 1.5; color: #fff8ee;
+  background: linear-gradient(180deg, rgba(48, 30, 58, 0.94), rgba(26, 18, 36, 0.94));
+  border: 2px solid #ffc46b; border-radius: 16px;
+  box-shadow: 0 0 0 4px rgba(255, 140, 90, 0.25), 0 10px 30px rgba(0, 0, 0, 0.6), inset 0 0 24px rgba(255, 170, 110, 0.12);
+  animation: talkIn 0.3s cubic-bezier(.2, 1.4, .4, 1);
 }
-#talkLine b { font-family: "Jua", "Malgun Gothic", sans-serif; font-weight: 400; color: #ffd36b; margin-right: 6px; }
-#talkLine b::after { content: ":"; margin-left: 1px; }
-@keyframes talkIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#talkLine b {
+  position: absolute; left: 18px; top: -16px;
+  font-family: "Jua", "Malgun Gothic", sans-serif; font-weight: 400; font-size: 19px;
+  color: #2a1a10; background: linear-gradient(180deg, #ffe08a, #ffb45a);
+  padding: 3px 14px; border-radius: 10px; border: 2px solid #fff3d0;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+}
+#talkLine .talkMore {
+  position: absolute; right: 16px; bottom: 8px; width: 0; height: 0;
+  border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid #ffc46b;
+  animation: talkBob 0.8s ease-in-out infinite alternate;
+}
+@keyframes talkIn { from { opacity: 0; transform: translate(-50%, 14px) scale(0.96); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes talkBob { to { transform: translateY(4px); } }
 #hint { font-size: 13px; margin-top: 2px; color: #f3e6ff; }
 
 /* 인벤토리 줄 */
@@ -318,4 +335,22 @@ body.locked canvas { cursor: none; }
 @media (max-width: 760px) {
   #keys { display: none; }
   #ytBox { transform: scale(0.6); transform-origin: top right; }
+}
+.hudLine.run { color: #8ad8ff; border-color: #8ad8ff55; }
+
+/* 탈의실: 내 모습이 보이게 오른쪽에 붙은 창 */
+.modal.side { background: transparent; place-items: center end; pointer-events: none; }
+.modal.side .modalBox { pointer-events: auto; width: min(400px, 100%); max-height: 92vh; }
+.dressRow { margin-bottom: 10px; }
+.dressRow .nm { font-weight: 800; font-size: 14px; margin-bottom: 5px; color: var(--sub); }
+.dressOpts { display: flex; flex-wrap: wrap; gap: 5px; }
+.optBtn { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: #2b2440; color: #eee; font: inherit; font-size: 13px; cursor: pointer; }
+.optBtn.on { background: #ffd36b; color: #2a1f10; border-color: #ffd36b; font-weight: 800; }
+.sw { width: 24px; height: 24px; border-radius: 6px; border: 2px solid #0006; cursor: pointer; padding: 0; }
+.sw.on { border-color: #fff; box-shadow: 0 0 0 2px #ffd36b; }
+.sw.none { background: #2b2440; color: #bbb; font-size: 12px; line-height: 1; }
+/* 좁은 화면(휴대폰 등)에서는 탈의실 창을 아래쪽에 낮게 놓아서 위쪽에 캐릭터가 보이게 해요 */
+@media (max-width: 699px) {
+  #dressPanel.modal.side { place-items: end center; }
+  #dressPanel.modal.side .modalBox { width: 100%; max-height: 46vh; }
 }

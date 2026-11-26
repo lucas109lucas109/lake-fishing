@@ -49,7 +49,7 @@ scene.add(violetGlow);
 const mat = (color, roughness = 0.86, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness, ...extra });
 
 // ---------- 땅 ----------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), mat(0x607856));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), mat(0x607856));
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.08;
 ground.receiveShadow = true;
@@ -70,15 +70,20 @@ function stairHeight(z) {
 
 // ---------- 물 ----------
 // 물은 타원 여러 개로 만들어요. y = 물 높이, luck = 여기서 낚으면 운 보너스
-const LAKE = { x: 0, z: -14, rx: 26, rz: 15, y: 0.02 }; // 엄청 넓은 큰 호수
+// biteMul = 입질까지 기다리는 시간 배율 (귀한 물고기가 많은 곳일수록 크게 = 입질이 늦어요)
+const LAKE = { x: 0, z: -14, rx: 26, rz: 15, y: 0.02, biteMul: 1 }; // 엄청 넓은 큰 호수
 const PLATEAU_TOP = PLATEAU.h + 0.09; // 풀 덮개 윗면 (여기에 발이 닿아요)
 const TOP_Y = PLATEAU_TOP + 0.13;     // 언덕 위 물 높이 (모래 테두리보다 위, 물결이 쳐도 안 숨게)
 const WATERS = [
   LAKE,
   { x: 23.5, z: FALL_Z, rx: 1.5, rz: 0.8, y: 0.025, stream: true },               // 폭포 아래 개울 → 큰 호수
-  { x: 29.8, z: -7.4, rx: 3.6, rz: 3.4, y: TOP_Y, luck: 0.05, name: '산 위 연못', zone: 'mountain' }, // 언덕 꼭대기 연못 (신기한 물고기)
-  { x: 25.3, z: FALL_Z, rx: 1.5, rz: 0.55, y: TOP_Y + 0.002, stream: true, zone: 'mountain' } // 연못 → 폭포로 가는 물길
+  { x: 29.8, z: -7.4, rx: 3.6, rz: 3.4, y: TOP_Y, luck: 0.05, name: '산 위 연못', zone: 'mountain', biteMul: 1.35 }, // 언덕 꼭대기 연못 (신기한 물고기)
+  { x: 25.3, z: FALL_Z, rx: 1.5, rz: 0.55, y: TOP_Y + 0.002, stream: true, zone: 'mountain', biteMul: 1.35 }, // 연못 → 폭포로 가는 물길
+  // 오로라 강: 큰 호수 서쪽, 언덕 반대편. 빛나는 물에 거대한 물고기가 살아요 (입질은 제일 늦게)
+  ...[[-50, 12], [-53, 2], [-57, -8], [-56, -18], [-52, -28], [-55, -38]].map(([x, z], i) => (
+    { x, z, rx: 6.6, rz: 6.2, y: 0.03 + i * 0.001, zone: 'aurora', aurora: true, river: true, luck: 0.04, biteMul: 1.75, name: '오로라 강' }))
 ];
+const RIVER = WATERS.filter((e) => e.aurora);
 // (x, z) 에 있는 물과, 물 한가운데서 얼마나 떨어졌는지(d: 0=가운데, 1=가장자리)
 function waterInfo(x, z, margin = 0) {
   for (const e of WATERS) {
@@ -183,10 +188,13 @@ const shimmerMats = [shimmerTex, shimmerTex2].map((map) => new THREE.MeshBasicMa
 }));
 const foamMats = [];
 const waterParts = [];
+// 오로라 강의 물: 청록빛으로 은은하게 스스로 빛나요 (밤에 특히 예뻐요)
+const auroraWaterMat = new THREE.MeshStandardMaterial({ color: 0x2a9aa8, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.93, vertexColors: true, emissive: 0x0a4a6a, emissiveIntensity: 0.45 });
+const auroraSandMat = mat(0xb8aac8, 0.95); // 보랏빛 모래
 WATERS.forEach((e, k) => {
   // 물가 모래 (개울은 모래 테두리를 얇게)
-  const pad = e.stream ? 0.35 : 0.9;
-  const shore = new THREE.Mesh(new THREE.CircleGeometry(1, 64), mat(0x8c7c5a));
+  const pad = e.stream ? 0.35 : e.river ? 1.3 : 0.9;
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(1, 64), e.aurora ? auroraSandMat : mat(0x8c7c5a));
   shore.rotation.x = -Math.PI / 2;
   shore.scale.set(e.rx + pad, e.rz + pad, 1);
   shore.position.set(e.x, e.y > 1 ? PLATEAU_TOP + 0.02 + k * 0.001 : -0.06 + k * 0.001, e.z);
@@ -208,7 +216,7 @@ WATERS.forEach((e, k) => {
     cols[i * 3] = v * 0.92; cols[i * 3 + 1] = v; cols[i * 3 + 2] = v * (1.02 - d * 0.04);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  const water = new THREE.Mesh(geo, waterMat);
+  const water = new THREE.Mesh(geo, e.aurora ? auroraWaterMat : waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.set(e.x, e.y + k * 0.002, e.z);
   water.receiveShadow = true;
@@ -222,7 +230,7 @@ WATERS.forEach((e, k) => {
     scene.add(sh);
   });
   // 물가의 하얀 거품 테두리 (개울은 빼요)
-  if (!e.stream) {
+  if (!e.stream && !e.river) {
     const fm = new THREE.MeshBasicMaterial({ color: 0xf4fbf6, transparent: true, opacity: 0.35, depthWrite: false });
     const foam = new THREE.Mesh(new THREE.RingGeometry(0.975, 1.004, 128), fm);
     foam.rotation.x = -Math.PI / 2;
@@ -605,6 +613,218 @@ const campfire = { flames: [], light: null };
   }
 }
 
+// =====================================================
+//  오로라 강 꾸미기 — 수정 기둥, 빛나는 버섯, 떠다니는 등불, 무지개 돌다리, 옛 유적, 하늘의 오로라
+// =====================================================
+const auroraFX = { lanterns: [], ribbons: [], blades: null };
+const LATE_TREES = [];
+// 강을 건너는 돌다리 (가운데가 볼록한 아치, 위로 걸어서 건널 수 있어요)
+const BRIDGE2 = { x0: -66, x1: -48, z: -8, w: 2.4 };
+const onBridge2 = (x, z) => x > BRIDGE2.x0 && x < BRIDGE2.x1 && Math.abs(z - BRIDGE2.z) < BRIDGE2.w / 2;
+const bridge2Y = (x) => 0.3 + Math.sin(Math.PI * (x - BRIDGE2.x0) / (BRIDGE2.x1 - BRIDGE2.x0)) * 1.2;
+function placeTree(x, z, s, y0 = 0, i = 0) {
+  addCollider(x, z, 0.8);
+  const put = (tree) => {
+    tree.position.set(x, y0, z);
+    tree.rotation.y = (i * 1.7) % (Math.PI * 2);
+    tree.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    scene.add(tree);
+  };
+  loader.load(treeURLs[i % 2], (gltf) => { gltf.scene.scale.setScalar(s); put(gltf.scene); }, undefined, () => put(makeBlockTree(s)));
+}
+{
+  let rs = 21;
+  const rnd = () => ((rs = (rs * 9301 + 49297) % 233280) / 233280);
+  const crystalA = mat(0x9af0ff, 0.2, { emissive: 0x2ab8e0, emissiveIntensity: 0.9, transparent: true, opacity: 0.9 });
+  const crystalB = mat(0xe0b0ff, 0.2, { emissive: 0x8a4aff, emissiveIntensity: 0.9, transparent: true, opacity: 0.9 });
+  const stoneM = mat(0x7a7a8c, 0.9), stoneD = mat(0x55556a, 0.9), mossM = mat(0x5a8a6a, 0.95);
+  const stemM = mat(0xf0eee0, 0.8);
+  const capMats = [0x6affe0, 0xff7ad8, 0xb48cff].map((c) => mat(c, 0.4, { emissive: c, emissiveIntensity: 0.8 }));
+  const crystalCluster = (x, z, big = 1, m = crystalA) => {
+    for (let k = 0; k < 4; k++) {
+      const c = new THREE.Mesh(new THREE.OctahedronGeometry((0.25 + rnd() * 0.25) * big, 0), k % 2 ? crystalB : m);
+      c.scale.y = 2.4 + rnd() * 1.8;
+      c.position.set(x + (rnd() - 0.5) * 0.9 * big, c.scale.y * 0.22 * big, z + (rnd() - 0.5) * 0.9 * big);
+      c.rotation.set((rnd() - 0.5) * 0.5, rnd() * 3, (rnd() - 0.5) * 0.5);
+      c.castShadow = true;
+      scene.add(c);
+    }
+  };
+  // 강둑을 따라 수정 무리와 빛나는 버섯
+  for (const e of RIVER) {
+    for (let k = 0; k < 9; k++) {
+      const a = rnd() * Math.PI * 2, r = 1.2 + rnd() * 0.45;
+      const x = e.x + Math.cos(a) * e.rx * r, z = e.z + Math.sin(a) * e.rz * r;
+      if (inLake(x, z, 0.4) || onBridge2(x, z) || Math.abs(z - BRIDGE2.z) < 2.4) continue;
+      if (k % 3 === 0) { crystalCluster(x, z, 1, k % 2 ? crystalB : crystalA); addCollider(x, z, 0.55); }
+      else {
+        const h = 0.4 + rnd() * 0.6;
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, h, 6), stemM);
+        stem.position.set(x, h / 2 - 0.08, z);
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.32 + rnd() * 0.18, 0.18, 8), capMats[k % 3]);
+        cap.position.set(x, h - 0.02, z);
+        scene.add(stem, cap);
+      }
+    }
+  }
+  // 랜드마크: 아주 큰 수정 탑
+  for (const [x, z, m] of [[-44, -1, crystalA], [-67, -21, crystalB], [-45, -35, crystalB], [-65, 7, crystalA]]) {
+    crystalCluster(x, z, 2.4, m);
+    addCollider(x, z, 1.4);
+  }
+  // 강 위에 둥둥 떠다니는 등불
+  const lanternGlow = [0xffc87a, 0xff9ad8, 0x9af0ff].map((c) => { const m = mat(c, 0.3, { emissive: c, emissiveIntensity: 1.3 }); LANTERN_MATS.push(m); return m; });
+  for (let i = 0; i < 18; i++) {
+    const e = RIVER[i % RIVER.length];
+    const a = rnd() * Math.PI * 2, r = rnd() * 0.75;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 0.28), lanternGlow[i % 3]);
+    const top = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.14, 4), darkWood);
+    top.position.y = 0.24; top.rotation.y = Math.PI / 4;
+    g.add(body, top);
+    g.position.set(e.x + Math.cos(a) * e.rx * r, 0.55 + rnd() * 0.4, e.z + Math.sin(a) * e.rz * r);
+    g.userData = { base: g.position.clone(), ph: rnd() * 6 };
+    scene.add(g);
+    auroraFX.lanterns.push(g);
+  }
+  // 은은한 빛 두 개 (청록 · 보라)
+  for (const [c, x, z] of [[0x4affe0, -54, -2], [0xb46cff, -54, -30]]) {
+    const l = new THREE.PointLight(c, 30, 26, 2);
+    l.position.set(x, 3, z);
+    scene.add(l);
+  }
+  // 무지개빛 돌다리 (아치)
+  const B = BRIDGE2, n = 16, seg = (B.x1 - B.x0) / n;
+  for (let i = 0; i < n; i++) {
+    const x = B.x0 + (i + 0.5) * seg, y = bridge2Y(x);
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(seg + 0.05, 0.22, B.w), i % 2 ? stoneM : stoneD);
+    slab.position.set(x, y - 0.11, B.z);
+    slab.rotation.z = Math.atan2(bridge2Y(x + 0.01) - bridge2Y(x - 0.01), 0.02);
+    slab.castShadow = slab.receiveShadow = true;
+    scene.add(slab);
+    for (const s of [-1, 1]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(seg + 0.05, 0.4, 0.18), stoneD);
+      rail.position.set(x, y + 0.2, B.z + s * (B.w / 2 + 0.05));
+      rail.rotation.z = slab.rotation.z;
+      scene.add(rail);
+      if (i % 4 === 0) {
+        const glow = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), i % 8 ? crystalB : crystalA);
+        glow.position.set(x, y + 0.6, B.z + s * (B.w / 2 + 0.05));
+        scene.add(glow);
+      }
+    }
+  }
+  // 옛 유적: 이끼 낀 부서진 기둥과 돌문
+  const pillar = (x, z, h) => {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.7, h, 0.7), stoneM);
+    p.position.set(x, h / 2 - 0.08, z);
+    const moss = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.15, 0.74), mossM);
+    moss.position.set(x, h - 0.05, z);
+    p.castShadow = true;
+    scene.add(p, moss);
+    addCollider(x, z, 0.5);
+  };
+  [[-43, -22, 3.2], [-43.5, -26, 1.6], [-66, -31, 2.6], [-67.5, -27, 3.4], [-62, 17, 1.2]].forEach(([x, z, h]) => pillar(x, z, h));
+  // 돌문 (아치)
+  for (const s of [-1, 1]) pillar(-40.5, -6 + s * 1.6, 3.6);
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 4.2), stoneD);
+  lintel.position.set(-40.5, 3.6, -6);
+  scene.add(lintel);
+  const gateSign = makeSign('오로라 강');
+  gateSign.scale.setScalar(0.9);
+  gateSign.position.set(-40.05, 3.0, -6);
+  gateSign.rotation.y = Math.PI / 2;
+  scene.add(gateSign);
+  // 오로라 강 쪽으로 가는 흙길
+  const pathMat = mat(0x8a7050, 0.95);
+  const PATH2 = [[-18.5, 8.5], [-26, 7.5], [-33, 3.5], [-38, -2], [-40.5, -6], [-46, -8], [BRIDGE2.x1 + 0.6, BRIDGE2.z]];
+  for (let i = 0; i < PATH2.length - 1; i++) {
+    const [ax, az] = PATH2[i], [bx, bz] = PATH2[i + 1];
+    const len = Math.hypot(bx - ax, bz - az);
+    const sg = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.02, len + 1.2), pathMat);
+    sg.position.set((ax + bx) / 2, -0.065, (az + bz) / 2);
+    sg.rotation.y = Math.atan2(bx - ax, bz - az);
+    sg.receiveShadow = true;
+    scene.add(sg);
+  }
+  // 하늘의 오로라 리본 (밤에 더 진하게 보여요)
+  for (let i = 0; i < 3; i++) {
+    const geo = new THREE.PlaneGeometry(130, 16 + i * 4, 64, 1);
+    const cols = new Float32Array(geo.attributes.position.count * 3);
+    const c1 = new THREE.Color([0x4affc8, 0x7a9aff, 0xd86aff][i]), c2 = new THREE.Color([0xb46cff, 0x4affe0, 0x6affa8][i]);
+    for (let v = 0; v < geo.attributes.position.count; v++) {
+      const t = (geo.attributes.position.getX(v) + 65) / 130;
+      const c = c1.clone().lerp(c2, t);
+      const top = geo.attributes.position.getY(v) > 0 ? 0.25 : 1;
+      cols[v * 3] = c.r * top; cols[v * 3 + 1] = c.g * top; cols[v * 3 + 2] = c.b * top;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    const rib = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    rib.position.set(-58 + i * 4, 46 + i * 5, -12 - i * 10);
+    rib.rotation.set(-0.25, Math.PI / 2 + (i - 1) * 0.25, 0);
+    rib.userData = { base: geo.attributes.position.array.slice(), ph: i * 2 };
+    scene.add(rib);
+    auroraFX.ribbons.push(rib);
+  }
+  // 서쪽 숲
+  [[-38, 12], [-42, 18], [-33, -12], [-37, -22], [-34, -32], [-71, 13], [-71, -12], [-69, -42], [-45, -45], [-60, 20], [-48, 20], [-28, 18]]
+    .forEach(([x, z], i) => LATE_TREES.push([x, z, 0.75 + (i % 4) * 0.1, 0, i])); // 나무 불러오는 도구가 준비된 뒤에 심어요
+
+  // ---------- 마을 꾸미기: 풍차 · 가로등 · 벤치 ----------
+  // 풍차
+  const wx = 12, wz = 19;
+  const towerM = mat(0xe8dcc8, 0.9), roofM = mat(0x8a3a2a, 0.85);
+  for (let i = 0; i < 4; i++) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(2.6 - i * 0.45, 1.6, 2.6 - i * 0.45), towerM);
+    t.position.set(wx, 0.72 + i * 1.6, wz);
+    t.castShadow = t.receiveShadow = true;
+    scene.add(t);
+  }
+  const wroof = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.2, 4), roofM);
+  wroof.position.set(wx, 7.4, wz);
+  wroof.rotation.y = Math.PI / 4;
+  scene.add(wroof);
+  const blades = new THREE.Group();
+  blades.position.set(wx, 6.2, wz - 1.05);
+  for (let i = 0; i < 4; i++) {
+    const arm = new THREE.Group();
+    arm.rotation.z = (i * Math.PI) / 2;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.16, 3.6, 0.1), darkWood);
+    bar.position.y = 1.8;
+    const sail = new THREE.Mesh(new THREE.BoxGeometry(0.75, 2.6, 0.04), mat(0xf4eee0, 0.9));
+    sail.position.set(0.42, 2.1, 0);
+    arm.add(bar, sail);
+    blades.add(arm);
+  }
+  scene.add(blades);
+  auroraFX.blades = blades;
+  addCollider(wx, wz, 1.7);
+  // 가로등 (밤에 환해져요)
+  const postM = mat(0x2a2430, 0.6);
+  [[-3.2, 9.2], [3.2, 9.2], [10.5, 9.6], [18, 7.6], [25, 6.8], [-12, 10.4], [-24, 8.2], [-33, 4.6], [-38.6, -1], [-45, -9.6], [9, 12.5]].forEach(([x, z]) => {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.3, 0.14), postM);
+    p.position.set(x, 1.07, z);
+    p.castShadow = true;
+    scene.add(p);
+    makeLantern(x, 2.4, z);
+    addCollider(x, z, 0.25);
+  });
+  // 벤치
+  [[-5, 12.4, 0], [5, 12.4, 0], [-36, 6, 0.6]].forEach(([x, z, ry]) => {
+    const g = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.1, 0.5), woodLight);
+    seat.position.y = 0.45;
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.45, 0.08), woodLight);
+    back.position.set(0, 0.75, 0.22);
+    g.add(seat, back);
+    for (const s of [-1, 1]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 0.45), darkWood); leg.position.set(s * 0.8, 0.2, 0); g.add(leg); }
+    g.position.set(x, -0.08, z);
+    g.rotation.y = ry;
+    scene.add(g);
+    addCollider(x, z, 0.7);
+  });
+}
+
 // ---------- 하늘에 떠가는 구름 (낮/밤에 따라 색이 바뀌어요) ----------
 const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffc8b0, transparent: true, opacity: 0.92, fog: false, depthWrite: false });
 const clouds = [];
@@ -671,6 +891,8 @@ const TREES = [];
 // 상점 근처, 맵 가장자리, 언덕 위
 TREES.push([-16, 10, 0.82], [17, 11.5, 0.9], [-27, 12, 0.85], [31, 10, 0.95], [42.5, -8, 0.9], [41, 5, 0.8], [37, -25, 0.85], [-36, -16, 0.9],
   [PLATEAU.x1 - 1.6, PLATEAU.z1 - 1.0, 0.7, PLATEAU_TOP], [PLATEAU.x0 + 1.6, PLATEAU.z1 - 1.2, 0.6, PLATEAU_TOP]);
+// 보트 상점(15.5, 6.6) 앞뒤를 가리는 나무는 빼요
+for (let i = TREES.length - 1; i >= 0; i--) if (Math.hypot(TREES[i][0] - 15.5, TREES[i][1] - 3) < 6.5) TREES.splice(i, 1);
 TREES.forEach(([x, z, s, y0 = 0], i) => {
     addCollider(x, z, 0.8);
     const place = (tree) => {
@@ -681,6 +903,7 @@ TREES.forEach(([x, z, s, y0 = 0], i) => {
     };
     loader.load(treeURLs[i % 2], (gltf) => { gltf.scene.scale.setScalar(s); place(gltf.scene); }, undefined, () => place(makeBlockTree(s)));
   });
+LATE_TREES.forEach(([x, z, sc, y0, i]) => placeTree(x, z, sc, y0, i)); // 서쪽 숲
 
 // =====================================================
 //  블록 캐릭터 (이 모양은 그대로 유지!)
@@ -716,6 +939,18 @@ function makeBlockPerson(o) {
     g.add(box(0.52, 0.48, 0.03, o.vest, 0, 0.84, 0.16));
   }
   if (o.apron) g.add(box(0.4, 0.6, 0.02, o.apron, 0, 0.72, -0.165));
+  if (o.scarf) {
+    // 목도리: 목에 두르고 한쪽 끝이 앞으로 늘어져요
+    g.add(box(0.56, 0.11, 0.36, o.scarf, 0, 1.12, 0));
+    g.add(box(0.13, 0.32, 0.05, o.scarf, 0.13, 0.94, -0.18));
+  }
+  if (o.backpack) {
+    // 배낭: 등에 메고 어깨끈이 앞으로
+    const dark = new THREE.Color(o.backpack).multiplyScalar(0.7).getHex();
+    g.add(box(0.42, 0.48, 0.2, o.backpack, 0, 0.86, 0.26));
+    g.add(box(0.34, 0.14, 0.07, dark, 0, 0.72, 0.39));
+    for (const s of [-1, 1]) g.add(box(0.06, 0.5, 0.04, dark, s * 0.15, 0.86, -0.165));
+  }
 
   const head = new THREE.Group();
   head.position.set(0, 1.33, 0);
@@ -771,6 +1006,15 @@ function makeBlockPerson(o) {
     band.position.y = 0.26;
     head.add(crown, brim, band);
   }
+  if (o.flower) {
+    // 꽃 장식: 머리(모자) 옆에 콕
+    const fy = o.hat ? 0.3 : 0.24;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      head.add(box(0.07, 0.07, 0.03, o.flower, 0.22 + Math.cos(a) * 0.05, fy + Math.sin(a) * 0.05, -0.08));
+    }
+    head.add(box(0.05, 0.05, 0.04, 0xffe23a, 0.22, fy, -0.085));
+  }
   const makeArm = (side) => {
     const pivot = new THREE.Group();
     pivot.position.set(side * 0.34, 1.04, 0);
@@ -787,13 +1031,50 @@ function makeBlockPerson(o) {
   return { group: g, head, armL, armR, legs, faceParts };
 }
 
+// =====================================================
+//  옷 정보 (탈의실에서 바꿔요) — 숫자로 저장하고, 숫자 → 실제 모양으로 바꿔요
+// =====================================================
+const OUTFIT_COLORS = [0xf4efe4, 0xffffff, 0xd9534f, 0xffa24a, 0xf2c14e, 0xd9a441, 0x6ab48a, 0x7d8f4e, 0x2a9aa8, 0x3a6ea5,
+  0x34405e, 0x8a6f9e, 0xff8ab8, 0x2a2a2a, 0x6b4a32, 0x8a8a8a, 0x4a2f22, 0xe8d8a0, 0xb8b8b8, 0xb46cff];
+const OUTFIT_OPTS = {
+  hat: { label: '모자', names: ['없음', '버킷햇', '야구모자', '밀짚모자'], values: [null, 'bucket', 'cap', 'straw'] },
+  hair: { label: '머리 모양', names: ['짧은 머리', '긴 머리', '민머리'], values: ['short', 'long', 'bald'] },
+  glasses: { label: '안경', names: ['없음', '검은 선글라스', '파란 선글라스', '금테 안경'], values: [null, 0x1d1d1d, 0x2a5aa8, 0xc8a040] },
+  beard: { label: '수염', names: ['없음', '있음'], values: [false, true] }
+};
+// 색칠하는 부분 (-1 = 없음)
+const OUTFIT_COLOR_PARTS = [['hatC', '모자 색'], ['hairC', '머리 색'], ['shirt', '윗옷'], ['pants', '바지'], ['vest', '조끼 (없음 가능)'], ['scarf', '목도리 (없음 가능)'], ['backpack', '배낭 (없음 가능)'], ['flower', '꽃 장식 (없음 가능)']];
+const OPTIONAL_PARTS = new Set(['vest', 'scarf', 'backpack', 'flower']);
+const DEFAULT_OUTFIT = { hat: 1, hatC: 5, hair: 0, hairC: 16, glasses: 0, beard: 0, shirt: 0, pants: 10, vest: 7, scarf: -1, backpack: -1, flower: -1 };
+// 저장된 옷 정보 검사 (숫자만, 범위 안만)
+function cleanOutfit(o) {
+  const out = { ...DEFAULT_OUTFIT };
+  if (!o || typeof o !== 'object') return out;
+  const n = (v, lo, hi, d) => (Number.isInteger(v) && v >= lo && v <= hi ? v : d);
+  for (const k of Object.keys(OUTFIT_OPTS)) out[k] = n(o[k], 0, OUTFIT_OPTS[k].values.length - 1, out[k]);
+  for (const [k] of OUTFIT_COLOR_PARTS) out[k] = n(o[k], OPTIONAL_PARTS.has(k) ? -1 : 0, OUTFIT_COLORS.length - 1, out[k]);
+  return out;
+}
+function outfitToLook(raw) {
+  const o = cleanOutfit(raw);
+  const C = (i) => (i >= 0 ? OUTFIT_COLORS[i] : null);
+  const vest = C(o.vest);
+  return {
+    skin: 0xf6cfa8, shirt: C(o.shirt), sleeve: C(o.shirt), pants: C(o.pants), boots: 0x6b3e2a,
+    vest, vestPocket: vest ? new THREE.Color(vest).multiplyScalar(0.78).getHex() : undefined,
+    hat: OUTFIT_OPTS.hat.values[o.hat], hatColor: C(o.hatC), hair: OUTFIT_OPTS.hair.values[o.hair], hairColor: C(o.hairC),
+    glasses: OUTFIT_OPTS.glasses.values[o.glasses], beard: OUTFIT_OPTS.beard.values[o.beard] ? C(o.hairC) : null,
+    scarf: C(o.scarf), backpack: C(o.backpack), flower: C(o.flower)
+  };
+}
+
 // ---------- 주인공 ----------
-const hero = makeBlockPerson({
+let hero = makeBlockPerson({
   skin: 0xf6cfa8, shirt: 0xf4efe4, sleeve: 0xf4efe4, vest: 0x7d8f4e, vestPocket: 0x5f6e37,
   pants: 0x34405e, boots: 0x6b3e2a, hair: 'short', hairColor: 0x4a2f22,
   hat: 'bucket', hatColor: 0xd9a441
 });
-const person = hero.group;
+let person = hero.group; // 탈의실에서 옷을 바꾸면 새로 만들어요
 person.scale.setScalar(1.2);
 scene.add(person);
 const player = { ry: 0, walkT: 0, moving: false };
@@ -874,9 +1155,79 @@ const RODS = [
   { name: '용암 낚싯대', shop: 'mountain', price: 45000, luck: 0.53, reel: 1.66, bite: 0.4, zone: 0.13,
     color: 0x1a1210, color2: 0x3a1a10, grip: 0x0c0806, accent: 0xff6a1a, reelC: 0x2a1a14, rings: 9, metal: 0.3, rough: 0.5, glow: 0xff5a10, tip: 'crystal', orbit: 5 },
   { name: '은하수 낚싯대', shop: 'mountain', price: 100000, luck: 0.62, reel: 1.8, bite: 0.34, zone: 0.15,
-    color: 0x0a0a2a, color2: 0x3a2a7a, grip: 0x14143a, accent: 0xc8b8ff, reelC: 0x1a1a4a, rings: 10, metal: 0.5, rough: 0.15, glow: 0x9a8aff, tip: 'star', orbit: 9 }
+    color: 0x0a0a2a, color2: 0x3a2a7a, grip: 0x14143a, accent: 0xc8b8ff, reelC: 0x1a1a4a, rings: 10, metal: 0.5, rough: 0.15, glow: 0x9a8aff, tip: 'star', orbit: 9 },
+  // ---- 오로라 강 상점에서만 팔아요 (shop: 'aurora') — 성능은 기존 낚싯대들 사이 ----
+  // 산호: 분홍·주황 산호 가지가 자라난 낚싯대, 끝에 빛나는 진주, 조개껍데기 릴
+  { name: '산호 낚싯대', shop: 'aurora', price: 9000, luck: 0.34, reel: 1.44, bite: 0.52, zone: 0.09, style: 'coral',
+    color: 0xff8a7a, color2: 0xffc8a8, grip: 0x2a5a6a, accent: 0xfff0e0, reelC: 0xffe8d8, rings: 4, metal: 0.15, rough: 0.45, glow: 0xffd8e8, tip: 'pearl', orbit: 0 },
+  // 오로라: 청록→보라로 물드는 몸통, 빛의 리본이 감싸 돌고, 끝의 프리즘이 무지개색으로 바뀌어요
+  { name: '오로라 낚싯대', shop: 'aurora', price: 30000, luck: 0.5, reel: 1.6, bite: 0.42, zone: 0.125, style: 'aurora',
+    color: 0x2affd0, color2: 0xb46cff, grip: 0x1a1a3a, accent: 0xe0fff8, reelC: 0x2a2a5a, rings: 6, metal: 0.4, rough: 0.15, glow: 0x7affe0, tip: 'prism', orbit: 0 },
+  // 심해왕의 삼지창: 깊은 바다색 몸통에 금빛 띠, 끝에 금빛 삼지창과 푸른 보석, 물방울이 보글보글
+  { name: '심해왕의 삼지창', shop: 'aurora', price: 70000, luck: 0.58, reel: 1.72, bite: 0.37, zone: 0.14, style: 'trident',
+    color: 0x0a1a3a, color2: 0x1a4a7a, grip: 0x3a2410, accent: 0xffd04a, reelC: 0xc8a030, rings: 7, metal: 0.7, rough: 0.2, glow: 0x3ad8ff, tip: 'trident', orbit: 0 }
 ];
 RODS.forEach((r) => (r.shop = r.shop || 'base')); // 표시 없는 건 아래 상점 낚싯대
+
+// =====================================================
+//  보트 (보트 상점에서 사요) — 보트 관리인한테 E 키로 불러서 타고, 스페이스(점프)로 뛰어내려요. 보트 위에서도 낚시돼요
+// =====================================================
+const BOAT_TYPES = [
+  { name: '나무 조각배', price: 3000, speed: 4.6, desc: '삐걱삐걱 노 젓는 소박한 배' },
+  { name: '오리배', price: 8000, speed: 5.8, desc: '페달을 밟는 귀여운 노란 오리' },
+  { name: '모터보트', price: 20000, speed: 8.8, desc: '물살을 가르는 빠른 하얀 보트' }
+];
+// 보트 모양: 앞이 -z 쪽 (캐릭터와 같은 방향). 물 높이에 바닥이 닿아요
+function makeBoatModel(type) {
+  const g = new THREE.Group();
+  const add = (w, h, d, c, x, y, z, rx = 0, ry = 0, rz = 0, extra = {}) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c, 0.7, extra));
+    m.position.set(x, y, z); m.rotation.set(rx, ry, rz);
+    m.castShadow = true;
+    g.add(m);
+    return m;
+  };
+  if (type === 0) {
+    const hull = 0x8a5a3a, rim = 0x6a4228;
+    add(1.1, 0.18, 2.5, hull, 0, 0.05, 0);
+    for (const s of [-1, 1]) add(0.1, 0.42, 2.5, rim, s * 0.58, 0.26, 0, 0, 0, s * -0.12);
+    add(1.1, 0.42, 0.1, rim, 0, 0.26, 1.25);
+    add(0.7, 0.4, 0.5, hull, 0, 0.22, -1.42, 0.25);                  // 뱃머리
+    add(1.0, 0.07, 0.36, 0xb08a61, 0, 0.36, 0.2);                    // 앉는 판
+    for (const s of [-1, 1]) {
+      const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8, 6), mat(0xb08a61));
+      oar.rotation.z = s * 1.2; oar.position.set(s * 0.95, 0.3, 0.1);
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.14), mat(0xb08a61));
+      blade.position.set(s * 1.7, -0.05, 0.1);
+      g.add(oar, blade);
+    }
+  } else if (type === 1) {
+    const yel = 0xffd84a, wht = 0xfff8e8;
+    add(1.4, 0.45, 2.3, yel, 0, 0.18, 0);
+    add(1.2, 0.08, 1.4, wht, 0, 0.42, 0.25);                          // 바닥
+    add(1.1, 0.5, 0.18, yel, 0, 0.6, 0.95);                           // 등받이
+    add(0.45, 0.85, 0.45, yel, 0, 0.75, -1.0);                        // 목
+    add(0.6, 0.55, 0.6, yel, 0, 1.35, -1.1);                          // 머리
+    add(0.36, 0.14, 0.36, 0xff8a2a, 0, 1.25, -1.5);                   // 부리
+    for (const s of [-1, 1]) {
+      add(0.08, 0.1, 0.02, 0x111111, s * 0.18, 1.45, -1.41);         // 눈
+      add(0.15, 0.38, 0.9, 0xf2c030, s * 0.72, 0.4, 0.3, 0, 0, s * -0.2); // 날개
+    }
+    add(0.7, 0.3, 0.3, yel, 0, 0.42, 1.25, -0.5);                     // 꼬리
+  } else {
+    const wht = 0xf4f4f4, red = 0xd9534f;
+    add(1.3, 0.35, 3.0, wht, 0, 0.12, 0);
+    for (const s of [-1, 1]) add(0.12, 0.38, 3.0, wht, s * 0.68, 0.36, 0);
+    for (const s of [-1, 1]) add(0.02, 0.1, 2.9, red, s * 0.745, 0.32, 0);   // 빨간 줄
+    add(1.0, 0.45, 0.8, wht, 0, 0.3, -1.6, 0.35);                      // 뾰족한 앞
+    add(1.2, 0.07, 1.4, 0x3a4a5a, 0, 0.32, 0.4);                       // 바닥
+    const glass = add(1.1, 0.45, 0.06, 0x9ad8ff, 0, 0.62, -0.55, -0.4, 0, 0, { transparent: true, opacity: 0.45, metalness: 0.3 });
+    glass.castShadow = false;
+    add(0.35, 0.5, 0.35, 0x2a2a30, 0, 0.45, 1.6);                      // 엔진
+    add(0.08, 0.5, 0.08, 0x3a3a40, 0, 0.05, 1.7);
+  }
+  return g;
+}
 const ROD_LEN = 2.6;
 
 // 낚싯대 모양 만들기: target 그룹 안에 부품을 채워요. 빙글빙글 도는 조각들을 돌려줘요.
@@ -933,6 +1284,79 @@ function buildRod(r, target) {
     b.scale.set(1.2, 0.35, 0.35);
     spin.push({ mesh: a, kind: 'self' }, { mesh: b, kind: 'self' });
   }
+  // ---------- 특별한 낚싯대 장식 ----------
+  if (r.style === 'coral') {
+    // 산호 가지: 몸통 여기저기에서 비스듬히 자라나요
+    const coralC = [0xff6a7a, 0xff9a5a, 0xffb8c8];
+    for (let k = 0; k < 9; k++) {
+      const y = -half + 0.9 + k * 0.2, side = k % 2 ? 1 : -1;
+      const br = put(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.022, 0.22 + (k % 3) * 0.06, 5), mat(coralC[k % 3], 0.6)), side * 0.06, y, (k % 3 - 1) * 0.03);
+      br.rotation.z = side * -0.9;
+      const bud = put(new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 5), mat(coralC[(k + 1) % 3], 0.5)), side * 0.15, y + 0.07, (k % 3 - 1) * 0.03);
+      bud.castShadow = false;
+    }
+    // 조개껍데기 릴 덮개
+    const shell = put(new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xfff0e8, 0.35, { metalness: 0.2 })), 0.16, -half + 0.85, 0);
+    shell.rotation.z = -Math.PI / 2;
+  }
+  if (r.tip === 'pearl') {
+    const pearl = put(new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 12), new THREE.MeshStandardMaterial({ color: 0xfff6fa, roughness: 0.1, metalness: 0.3, emissive: 0xffd0e8, emissiveIntensity: 0.6 })), 0, half + 0.06, 0);
+    const cup = put(new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.07, 6), mat(0xff8a7a, 0.5)), 0, half, 0);
+    cup.rotation.x = Math.PI;
+    spin.push({ mesh: pearl, kind: 'pulse', base: 1 });
+  }
+  if (r.style === 'aurora') {
+    // 빛의 리본 두 줄이 몸통 위쪽을 나선으로 감싸며 천천히 돌아요
+    for (let k = 0; k < 2; k++) {
+      const g = new THREE.PlaneGeometry(0.07, 1.5, 1, 16);
+      const pos = g.attributes.position, cols = new Float32Array(pos.count * 3);
+      const c1 = new THREE.Color(0x4affd0), c2 = new THREE.Color(0xd06aff);
+      for (let v = 0; v < pos.count; v++) {
+        const t = (pos.getY(v) + 0.75) / 1.5;
+        const ang = t * Math.PI * 3 + k * Math.PI;
+        pos.setXYZ(v, Math.cos(ang) * 0.1 + pos.getX(v), pos.getY(v), Math.sin(ang) * 0.1);
+        const c = c1.clone().lerp(c2, t);
+        cols[v * 3] = c.r; cols[v * 3 + 1] = c.g; cols[v * 3 + 2] = c.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      const rib = put(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })), 0, half - 0.6, 0);
+      rib.castShadow = false;
+      spin.push({ mesh: rib, kind: 'twirl', sp: k ? -0.8 : 1.1 });
+    }
+  }
+  if (r.tip === 'prism') {
+    const pr = put(new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.05, metalness: 0.2, emissive: 0x7affe0, emissiveIntensity: 1.4, transparent: true, opacity: 0.9 })), 0, half + 0.1, 0);
+    pr.scale.set(0.8, 1.6, 0.8);
+    spin.push({ mesh: pr, kind: 'hue' });
+  }
+  if (r.tip === 'trident') {
+    // 금빛 삼지창 머리 + 가운데 푸른 보석
+    const goldM = mat(0xffd04a, 0.25, { metalness: 0.85, emissive: 0x6a4a00, emissiveIntensity: 0.4 });
+    put(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.035), goldM), 0, half + 0.02, 0);       // 가로대
+    put(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.34, 0.035), goldM), 0, half + 0.19, 0);       // 가운데 창
+    put(new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.1, 4), goldM), 0, half + 0.41, 0);
+    for (const s of [-1, 1]) {
+      put(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.03), goldM), s * 0.16, half + 0.12, 0);
+      const tipC = put(new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.08, 4), goldM), s * 0.16, half + 0.27, 0);
+      tipC.castShadow = false;
+      const barb = put(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.025), goldM), s * 0.19, half + 0.2, 0);
+      barb.rotation.z = s * 0.6;
+    }
+    const gem = put(new THREE.Mesh(new THREE.OctahedronGeometry(0.06, 0), new THREE.MeshStandardMaterial({ color: 0x8af0ff, roughness: 0.05, emissive: 0x3ad8ff, emissiveIntensity: 1.6 })), 0, half + 0.02, 0.03);
+    spin.push({ mesh: gem, kind: 'pulse', base: 1 });
+    // 비늘 무늬 띠
+    for (let k = 0; k < 6; k++) {
+      const y = -half + 1.0 + k * 0.22, rad = 0.058 - ((y + half) / ROD_LEN) * 0.036 + 0.006;
+      const sc = put(new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, 0.06, 6), mat(0x2a6aa8, 0.3, { metalness: 0.6 })), 0, y, 0);
+      sc.rotation.y = k * 0.5;
+    }
+    // 보글보글 올라가는 물방울
+    for (let k = 0; k < 6; k++) {
+      const b = put(new THREE.Mesh(new THREE.SphereGeometry(0.018 + (k % 3) * 0.008, 6, 5), new THREE.MeshBasicMaterial({ color: 0xbff4ff, transparent: true, opacity: 0.7 })), 0, 0, 0);
+      b.castShadow = false;
+      spin.push({ mesh: b, kind: 'bubble', ph: k / 6, rad: 0.05 + (k % 2) * 0.05 });
+    }
+  }
   // 끝 주변을 빙글빙글 도는 작은 조각들
   for (let k = 0; k < (r.orbit || 0); k++) {
     const s = put(new THREE.Mesh(new THREE.OctahedronGeometry(r.tip === 'star' ? 0.025 : 0.035, 0), glowMat(k % 2 ? r.accent : r.glow, 1.5)), 0, half, 0);
@@ -945,6 +1369,15 @@ function placeSpin(spin, t) {
   const half = ROD_LEN / 2;
   spin.forEach((s, i) => {
     if (s.kind === 'self') { s.mesh.rotation.y = t * 1.5; return; }
+    if (s.kind === 'pulse') { s.mesh.scale.setScalar(s.base * (1 + Math.sin(t * 3 + i) * 0.12)); s.mesh.rotation.y = t; return; }
+    if (s.kind === 'twirl') { s.mesh.rotation.y = t * s.sp; return; }
+    if (s.kind === 'hue') { s.mesh.material.emissive.setHSL((t * 0.15) % 1, 0.9, 0.55); s.mesh.rotation.y = t * 1.2; return; }
+    if (s.kind === 'bubble') {
+      const q = (t * 0.45 + s.ph) % 1;
+      s.mesh.position.set(Math.cos(s.ph * 20) * s.rad, half - 0.5 + q * 1.1, Math.sin(s.ph * 20) * s.rad);
+      s.mesh.material.opacity = 0.7 * (1 - q);
+      return;
+    }
     const a = t * s.sp + s.ph;
     s.mesh.position.set(Math.cos(a) * s.rad, half - 0.05 + Math.sin(t * 2 + i) * 0.06, Math.sin(a) * s.rad);
     s.mesh.rotation.set(t * 2, t * 3, 0);
@@ -1059,6 +1492,18 @@ Object.assign(npcs[3], { name: '고수 할배', li: 0, count: 99812, lines: [
   '밤에 오게. 연못이 별을 삼키면 귀한 놈들이 올라온다네.',
   '젊었을 땐 나도 기본 낚싯대 하나로 시작했지. 지금은… 비밀일세.',
   '저 아래 큰 호수 대왕 참치? 내가 놓아준 놈일걸.'
+] });
+// 오로라 지기: 오로라 강을 지키는 사람. 강가에 서서 낚시해요
+addNPC({ skin: 0xe8c4a4, shirt: 0x1a3a4a, sleeve: 0x1a3a4a, pants: 0x18222e, boots: 0x101820, hair: 'long', hairColor: 0x9ae0d8,
+  glasses: 0x5ad8c8, hat: 'bucket', hatColor: 0x2a6a7a, vest: 0x3a5a8a, vestPocket: 0x2a4068, rodColor: 0x6ad8e8 },
+  new THREE.Vector3(-42.6, -0.08, 7.5), Math.PI / 2 + 0.15, new THREE.Vector3(-47.5, 0.17, 8.2), false);
+Object.assign(npcs[4], { name: '오로라 지기', li: 0, count: 3407, lines: [
+  '이 강은 밤마다 하늘을 비춰요. 그래서 오로라 강이에요.',
+  '여긴 입질이 느려요. 좋은 물고기일수록 오래 생각하거든요.',
+  '리바이어던을 본 적 있어요. 화면이… 아니, 눈앞이 전부 그 녀석이었어요.',
+  '등불은 떠난 낚시꾼들이 남긴 거래요. 그냥 그렇다고 믿고 있어요.',
+  '삼천 마리를 넘게 잡았지만, 고래상어 앞에선 아직도 손이 떨려요.',
+  '공방 주인이 만든 삼지창, 진짜 심해왕 거라는 소문이 있어요.'
 ] });
 npcs.forEach((n) => n.tag.draw(n.name, n.count)); // 이름표 그리기
 // 시간대마다 가끔 하는 말
@@ -1210,6 +1655,113 @@ function makeShop(kind, title, x, z, faceX, faceZ, wallColor, roofColor, y = -0.
   keeper.group.scale.setScalar(1.15);
   g.add(keeper.group);
 }
+// 탈의실: 거울과 옷걸이가 있어요. 여기서 옷과 액세서리를 바꿔요
+{
+  const { g, part } = makeShop('dress', '탈의실', -13.5, 16, -6, 9, 0xd8b8c8, 0x7a3a5a);
+  const mirror = part(1.0, 1.9, 0.06, new THREE.MeshStandardMaterial({ color: 0xdfeef8, roughness: 0.05, metalness: 0.9 }), -1.0, 1.2, -1.2);
+  part(1.12, 2.02, 0.05, darkWood, -1.0, 1.2, -1.24);
+  part(1.6, 0.06, 0.06, darkWood, 0.6, 2.0, -0.9);       // 옷걸이 봉
+  [0xd9534f, 0x3a6ea5, 0xf2c14e, 0x6ab48a, 0xb46cff].forEach((c, i) => {
+    part(0.26, 0.5, 0.06, mat(c, 0.9), 0.0 + i * 0.3, 1.65, -0.9);     // 걸려 있는 옷
+  });
+  mirror.castShadow = false;
+}
+// 보트 상점: 호숫가에 있고, 앞 물 위에 보트 3척이 떠 있어요 (구경용)
+const shopBoats = [];
+{
+  const { g, part } = makeShop('boat', '보트 상점', 15.5, 6.6, 15.5, -2, 0x4a7a9a, 0x2a4a6a);
+  part(0.9, 0.12, 0.3, mat(0xf4f4f4), -1.0, 1.0, -1.18);   // 구명튜브 걸이
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.1, 8, 16), mat(0xff6a3a));
+  ring.position.set(1.0, 1.6, -1.15);
+  g.add(ring);
+  const keeper = makeBlockPerson({ skin: 0xe8b48a, shirt: 0xf4f4f4, vest: 0xff6a3a, vestPocket: 0xd04a2a, pants: 0x2a3a5a, boots: 0x2a2a30, hair: 'short', hairColor: 0x2a1a12, hat: 'cap', hatColor: 0x2a4a6a });
+  keeper.group.position.set(0, 0.2, 0.1);
+  keeper.group.rotation.y = Math.PI;
+  keeper.group.scale.setScalar(1.15);
+  g.add(keeper.group);
+  BOAT_TYPES.forEach((b, i) => {
+    const m = makeBoatModel(i);
+    m.position.set(12.2 + i * 3.3, LAKE.y, -3.4 - (i === 1 ? 0.4 : 0));
+    m.rotation.y = 0.25 - i * 0.25;
+    scene.add(m);
+    shopBoats.push({ m, ph: i * 1.7 });
+  });
+}
+// 보트 관리인: 호숫가에 서 있어요. 가까이 가서 E 키를 누르면 내 보트를 앞 물에 띄워 주고 태워 줘요
+//  x, z = 관리인이 서 있는 곳, wx, wz = 보트를 띄워 주는 물 위 자리
+const BOAT_CALLERS = [
+  { x: 8.0, z: 2.5, wx: 8.0, wz: -2.8 },     // 보트 상점 옆
+  { x: 3.2, z: -31.2, wx: 3.2, wz: -26.0 }   // 호수 건너편 (북쪽 물가)
+];
+for (const c of BOAT_CALLERS) {
+  const ry = Math.atan2(c.x - c.wx, c.z - c.wz); // 물 쪽을 바라봐요 (사람 앞은 -z)
+  const man = makeBlockPerson({ skin: 0xd8a070, shirt: 0x2a4a6a, vest: 0xf2c14e, vestPocket: 0xc89a2a, pants: 0x3a3a40, boots: 0x2a2a30, hair: 'short', hairColor: 0x5a3a22, hat: 'cap', hatColor: 0xff6a3a });
+  man.group.position.set(c.x, groundY(c.x, c.z), c.z);
+  man.group.rotation.y = ry;
+  scene.add(man.group);
+  // 옆에 작은 말뚝 + 구명튜브 (보트 부르는 곳 표시)
+  const side = new THREE.Vector3(Math.cos(ry), 0, -Math.sin(ry)); // 관리인 오른쪽
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.3, 0.18), darkWood);
+  post.position.set(c.x + side.x * 0.9, groundY(c.x, c.z) + 0.65, c.z + side.z * 0.9);
+  post.castShadow = true;
+  scene.add(post);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.08, 8, 16), mat(0xff6a3a));
+  ring.position.set(post.position.x, post.position.y + 0.25, post.position.z);
+  ring.rotation.y = ry;
+  scene.add(ring);
+  addCollider(c.x, c.z, 0.5);
+  const base = new THREE.Vector3(c.x, groundY(c.x, c.z), c.z);
+  shops.push({ kind: 'boatcall', title: '보트 소환 · 보트 관리인', group: man.group, caller: c, pos: base.clone(), promptAt: base.clone().add(new THREE.Vector3(0, 3.1, 0)) });
+}
+// 오로라 강 낚싯대 공방: 가게 앞 받침대 위에서 새 낚싯대 3종이 빙글빙글 돌며 전시돼요
+const displayRods = [];
+{
+  const sx = -44.5, sz = -15.5;
+  const { g, part } = makeShop('rod3', '낚싯대 공방', sx, sz, -41, -9, 0x3a4a6a, 0x1a2a4a);
+  const rods = RODS.filter((r) => r.shop === 'aurora');
+  // 가게 안 벽에도 걸어 둬요
+  rods.forEach((r, i) => {
+    const m = new THREE.Group();
+    shopRodSpins.push(buildRod(r, m));
+    m.position.set(-0.9 + i * 0.9, 1.25, -1.12);
+    m.rotation.z = 0.1;
+    m.scale.setScalar(0.75);
+    g.add(m);
+  });
+  const keeper = makeBlockPerson({ skin: 0xd8a882, shirt: 0x2a6a8a, pants: 0x2a2a3a, boots: 0x1a1a22, hair: 'short', hairColor: 0xe8e8f0, beard: 0xe8e8f0, glasses: 0x4affd0, hat: 'cap', hatColor: 0x1a3a5a, apron: 0x6a4a2a });
+  keeper.group.position.set(0, 0.2, 0.1);
+  keeper.group.rotation.y = Math.PI;
+  keeper.group.scale.setScalar(1.15);
+  g.add(keeper.group);
+  // 가게 앞 전시대 3개: 돌 받침대 + 빛나는 고리 + 이름표, 낚싯대가 세워져서 천천히 돌아요
+  const ry = g.rotation.y, fx = Math.sin(ry), fz = Math.cos(ry), rx = Math.cos(ry), rz = -Math.sin(ry);
+  const pedM = mat(0x6a6a82, 0.7), ringM = mat(0x7affe0, 0.3, { emissive: 0x4affd0, emissiveIntensity: 1.2 });
+  rods.forEach((r, i) => {
+    const off = (i - 1) * 2.2;
+    const px = sx + fx * 3.6 + rx * off, pz = sz + fz * 3.6 + rz * off;
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.8, 10), pedM);
+    ped.position.set(px, 0.32, pz);
+    ped.castShadow = ped.receiveShadow = true;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.03, 6, 24), ringM);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(px, 0.74, pz);
+    scene.add(ped, ring);
+    const holder = new THREE.Group();
+    holder.position.set(px, 0.72 + ROD_LEN / 2 * 1.05, pz);
+    const rg = new THREE.Group();
+    rg.scale.setScalar(1.05);
+    holder.add(rg);
+    const sp = buildRod(r, rg);
+    scene.add(holder);
+    displayRods.push({ holder, sp, ph: i * 2 });
+    const tag = makeSign(r.name.replace(' 낚싯대', ''));
+    tag.scale.setScalar(0.42);
+    tag.position.set(px + fx * 0.52, 0.55, pz + fz * 0.52);
+    tag.rotation.y = ry;
+    scene.add(tag);
+    addCollider(px, pz, 0.55);
+  });
+}
 // 언덕 위 낚싯대 상점: 산 위 연못을 바라봐요. 특별한 낚싯대 3종
 {
   const { g, part } = makeShop('rod2', '언덕 위 상점', 36.6, -6.5, 30, -6.5, 0x4a3a6a, 0x2a1a4a, PLATEAU_TOP);
@@ -1247,9 +1799,14 @@ const WALKER_LOOKS = [
   { skin: 0xf0c8a0, shirt: 0x3a6ea5, pants: 0x2a2f3a, boots: 0x222222, hair: 'short', hairColor: 0x2a1a12, hat: 'cap', hatColor: 0xd04040 },
   { skin: 0xe2b08a, shirt: 0x8ac06a, pants: 0x4a3a2a, boots: 0x3a2a1a, hair: 'long', hairColor: 0xc08040 },
   { skin: 0xf6d4b4, shirt: 0x2a2a2a, pants: 0x5a5a7a, boots: 0x1a1a1a, hair: 'short', hairColor: 0x111111, glasses: 0x223344, vest: 0xb05a2a, vestPocket: 0x8a4420 },
-  { skin: 0xd8a882, shirt: 0xe0d0a0, pants: 0x3a4a5a, boots: 0x4a3020, hair: 'short', hairColor: 0x6a4a2a, hat: 'bucket', hatColor: 0x5a7aa0 }
+  { skin: 0xd8a882, shirt: 0xe0d0a0, pants: 0x3a4a5a, boots: 0x4a3020, hair: 'short', hairColor: 0x6a4a2a, hat: 'bucket', hatColor: 0x5a7aa0 },
+  // 베테랑: 낚시광 민수 (낚시 조끼에 야구모자, 선글라스)
+  { skin: 0xe6b894, shirt: 0xf0f0f0, pants: 0x3a4030, boots: 0x2a2a20, hair: 'short', hairColor: 0x1a1210, glasses: 0x1d1d1d, hat: 'cap', hatColor: 0x2a5a3a, vest: 0x6a7a4a, vestPocket: 0x4a5a32, backpack: 0x8a5a2a },
+  // 베테랑: 새벽물결 (푸른 옷, 긴 머리, 목도리)
+  { skin: 0xf3d2b3, shirt: 0x2a3a6a, pants: 0x1e2440, boots: 0x1a1a22, hair: 'long', hairColor: 0x3a2a4a, hat: 'bucket', hatColor: 0x8ab8d8, scarf: 0x6ad8c8 }
 ];
-const WALKER_NAMES = ['물결소년', '노을헌터', '붕어왕', '밤낚시러'];
+const WALKER_NAMES = ['물결소년', '노을헌터', '붕어왕', '밤낚시러', '낚시광 민수', '새벽물결'];
+const WALKER_COUNTS = [null, null, null, null, 812, 1254]; // 베테랑은 잡은 수가 정해져 있어요
 const WALKER_LINES = [
   ['형, 밤에는 귀한 물고기가 더 잘 나온대요! 진짜예요.',
    '엄마가 저녁 먹으러 오랬는데… 한 마리만 더 잡고 갈래요.',
@@ -1270,9 +1827,21 @@ const WALKER_LINES = [
    '그림자 낚싯대 끝에서 빛나는 게 뭔지 알아? 나도 몰라.',
    '피곤해… 어제 새벽 네 시까지 여기 있었거든.',
    '다크 이로치는 밤에 보면 진짜 멋있어.',
-   '말 걸지 마… 아니, 걸어도 돼. 사실 심심했어.']
+   '말 걸지 마… 아니, 걸어도 돼. 사실 심심했어.'],
+  ['팔백 마리 넘게 잡았는데, 아직도 찌가 쏙 들어가면 심장이 쿵 해요.',
+   '오로라 강은 입질이 느려요. 대신 한 번 물면 화면이 꽉 차는 놈이 올라오죠.',
+   '보트 타고 호수 한가운데 가 봤어요? 거기서 던지면 기분이 달라요.',
+   '낚싯대는 비싼 게 다가 아니에요. 그래도… 삼지창은 갖고 싶다.',
+   '회사 그만두고 낚시만 한 지 삼 년째예요. 후회는… 가끔만 해요.',
+   '탈의실에서 옷 갈아입었어요? 낚시는 장비빨, 아니 옷빨이에요.'],
+  ['새벽 다섯 시 물결이 제일 예뻐요. 그래서 이름도 새벽물결이에요.',
+   '천 마리째 잡던 날, 그냥 놓아줬어요. 고맙다고 하는 것 같았거든요.',
+   '오로라 강에 떠 있는 등불들, 누가 띄우는 건지 아무도 몰라요.',
+   '골드에 다이아까지 붙은 놈 본 적 있어요? 저는 딱 한 번요. 스무 배였어요.',
+   '빨리 잡으려고 하면 안 잡혀요. 물이 허락해 줄 때까지 기다려요.',
+   '밤에 오로라 강에 가 봐요. 하늘이랑 물이 같이 일렁여요.']
 ];
-const WALKER_START = [[-3, 11], [3.5, 12], [-10, 11], [12.5, 9]];
+const WALKER_START = [[-3, 11], [3.5, 12], [-10, 11], [12.5, 9], [-30, 4], [-38, -12]];
 const walkers = [];
 
 // 이름표: 위에 이름, 아래에 잡은 수
@@ -1312,7 +1881,7 @@ WALKER_LOOKS.forEach((look, i) => {
   rodG.rotation.x = -2.1;
   rodG.visible = false;
   p.armR.add(rodG);
-  const rodIdx = [1, 2, 3, 4][i];
+  const rodIdx = [1, 2, 3, 4, 6, 10][i];
   const spin = buildRod(RODS[rodIdx], rodG);
   const b = makeBobber(0.9);
   b.visible = false;
@@ -1322,10 +1891,10 @@ WALKER_LOOKS.forEach((look, i) => {
   scene.add(line);
   const tag = makeNameTag();
   p.group.add(tag.sp);
-  const count = 10 + Math.floor(Math.random() * 60);
+  const count = WALKER_COUNTS[i] ?? 10 + Math.floor(Math.random() * 60);
   tag.draw(WALKER_NAMES[i], count);
   walkers.push({
-    ...p, rodG, spin, rod: RODS[rodIdx], bobber: b, line, tag, name: WALKER_NAMES[i], count, lines: WALKER_LINES[i], li: 0, talkUntil: 0,
+    ...p, veteran: i >= 4, rodG, spin, rod: RODS[rodIdx], bobber: b, line, tag, name: WALKER_NAMES[i], count, lines: WALKER_LINES[i], li: 0, talkUntil: 0,
     state: 'think', until: performance.now() + 500 + i * 900, path: [], job: null, spot: null,
     ry: Math.PI, walkT: 0, arm: 0, bag: 0, sellAt: 3 + Math.floor(Math.random() * 4), fishLeft: 0,
     speed: 3.2 + Math.random() * 0.8, stuckAt: 0, stuckPos: new THREE.Vector3(), pop: null, target: new THREE.Vector3(), from: new THREE.Vector3()
@@ -1405,8 +1974,18 @@ function pondSpot() {
   const P = WATERS[2];
   for (let i = 0; i < 20; i++) {
     const a = Math.random() * Math.PI * 2;
-    const x = P.x + Math.cos(a) * P.rx * 1.2, z = P.z + Math.sin(a) * P.rz * 1.2;
-    if (onPlateau(x, z) && walkable(x, z, undefined, undefined, true)) return { x, z, face: faceTo(x, z, P.x, P.z) };
+    const x = P.x + Math.cos(a) * P.rx * 1.25, z = P.z + Math.sin(a) * P.rz * 1.25;
+    // 물 안(물길 포함)은 안 돼요 — 물속에서 제자리걸음 하던 버그 고침
+    if (onPlateau(x, z) && !waterAt(x, z) && walkable(x, z, undefined, undefined, true)) return { x, z, face: faceTo(x, z, P.x, P.z) };
+  }
+  return null;
+}
+// 오로라 강 동쪽 강가 (베테랑만 가요)
+function auroraSpot() {
+  for (let i = 0; i < 20; i++) {
+    const e = RIVER[Math.floor(Math.random() * RIVER.length)];
+    const x = e.x + e.rx * (1.12 + Math.random() * 0.15), z = e.z + (Math.random() - 0.5) * e.rz;
+    if (!waterAt(x, z) && !onBridge2(x, z) && walkable(x, z, undefined, undefined, true)) return { x, z, face: faceTo(x, z, e.x, z) };
   }
   return null;
 }
@@ -1430,8 +2009,9 @@ function walkerThink(w, now) {
     spot = { x: sell.pos.x + (Math.random() - 0.5), z: sell.pos.z + (Math.random() - 0.5), face: faceTo(sell.pos.x, sell.pos.z, sell.group.position.x, sell.group.position.z) };
   } else {
     const r = Math.random();
-    w.job = r < 0.55 ? 'lake' : r < 0.75 ? 'dock' : 'pond';
-    spot = w.job === 'lake' ? lakeSpot() : w.job === 'dock' ? dockSpot() : pondSpot();
+    if (w.veteran && r < 0.5) w.job = 'aurora';
+    else w.job = r < 0.55 ? 'lake' : r < 0.75 ? 'dock' : 'pond';
+    spot = w.job === 'lake' ? lakeSpot() : w.job === 'dock' ? dockSpot() : w.job === 'aurora' ? auroraSpot() : pondSpot();
   }
   const path = spot && planPath(w.group.position, spot);
   if (!path) { w.until = now + 400; return; } // 길이 없으면 잠깐 있다가 다시 골라요
@@ -1473,16 +2053,18 @@ function updateWalkers(now, dt, t) {
         else {
           const step = Math.min(dist, w.speed * dt);
           const nx = p.x + dx / dist * step, nz = p.z + dz / dist * step;
+          let moved = true;
           if (walkable(nx, nz, p.x, p.z, true)) { p.x = nx; p.z = nz; }
           else if (walkable(nx, p.z, p.x, p.z, true)) p.x = nx;
           else if (walkable(p.x, nz, p.x, p.z, true)) p.z = nz;
+          else moved = false; // 막혔어요: 다리를 움직이지 않아요
           let diff = Math.atan2(-dx, -dz) - w.ry;
           diff = Math.atan2(Math.sin(diff), Math.cos(diff));
           w.ry += diff * Math.min(1, dt * 10);
-          moving = true;
+          moving = moved;
         }
-        // 1.5초 동안 거의 못 움직였으면 다른 곳으로
-        if (now - w.stuckAt > 1500) {
+        // 1초 동안 거의 못 움직였으면 다른 곳으로
+        if (now - w.stuckAt > 1000) {
           if (p.distanceTo(w.stuckPos) < 0.3) { w.state = 'think'; w.until = now + 300; }
           w.stuckAt = now;
           w.stuckPos.copy(p);
@@ -1512,6 +2094,7 @@ function updateWalkers(now, dt, t) {
           w.zone = waterAt(tg.x, tg.z)?.zone || 'lake';
           w.rodG.localToWorld(w.from.set(0, ROD_LEN / 2, 0));
           w.state = 'cast'; w.castAt = now; w.until = now + 800;
+          w.biteMul = waterAt(tg.x, tg.z)?.biteMul || 1;
           w.bobber.visible = true;
         }
       }
@@ -1520,7 +2103,7 @@ function updateWalkers(now, dt, t) {
       const k = Math.min(1, (now - w.castAt) / 800);
       w.bobber.position.lerpVectors(w.from, w.target, 1 - Math.pow(1 - k, 3));
       w.bobber.position.y += Math.sin(k * Math.PI) * 2;
-      if (k >= 1) { w.state = 'wait'; w.until = now + (3000 + Math.random() * 5000) * w.rod.bite; }
+      if (k >= 1) { w.state = 'wait'; w.until = now + (3000 + Math.random() * 5000) * w.rod.bite * (w.biteMul || 1); }
     } else if (w.state === 'wait') {
       w.bobber.position.y = w.target.y + Math.sin(t * 2.2 + w.ry) * 0.04;
       if (now > w.until) { w.state = 'bite'; w.until = now + 800; }
@@ -1612,7 +2195,7 @@ function updateWalkers(now, dt, t) {
 //  저장 (브라우저에 기록)
 // =====================================================
 const SAVE_KEY = 'lakeFishing_v2';
-const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0 };
+const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1 };
 
 // 저장된 기록은 누구나 개발자 도구로 고칠 수 있어서 그대로 믿으면 안 돼요.
 // 불러올 때 하나하나 검사해서, 이상한 값은 버리거나 안전한 값으로 바꿔요.
@@ -1664,6 +2247,10 @@ function cleanSave(s) {
   } else out.quest = null;
   out.questReadyAt = intIn(s.questReadyAt, 0, 1e15, 0);
   out.questsDone = intIn(s.questsDone, 0, 1e9, 0);
+  out.outfit = cleanOutfit(s.outfit);
+  // 보트: 실제 있는 보트 번호만
+  out.boats = Array.isArray(s.boats) ? [...new Set(s.boats.filter((b) => Number.isInteger(b) && b >= 0 && b < BOAT_TYPES.length))] : [];
+  out.boat = out.boats.includes(s.boat) ? s.boat : (out.boats[0] ?? -1);
   return out;
 }
 try {
@@ -1708,7 +2295,7 @@ function updateUI() {
   ui.reelBox.classList.toggle('hidden', s !== 'reeling');
   const set = (a, b, html = false) => { if (html) ui.status.innerHTML = a; else ui.status.textContent = a; ui.hint.textContent = b; };
   if (s === 'idle' && !game.rodOut) set(game.notice || '', '1번 키(또는 인벤토리 첫 칸)로 낚싯대를 꺼내요.', true);
-  else if (s === 'idle') set(game.notice || '호수 쪽을 바라보고 던져 보세요.', '클릭(또는 스페이스바)을 꾹 눌렀다 놓으면 던져요. 1번을 다시 누르면 넣어요.', true);
+  else if (s === 'idle') set(game.notice || '호수 쪽을 바라보고 던져 보세요.', '클릭을 꾹 눌렀다 놓으면 던져요. 1번을 다시 누르면 넣어요.', true);
   if (s === 'charging') set('힘을 모으는 중', '원하는 힘에서 손을 떼요.');
   if (s === 'casting') set(game.inWater ? '입질을 기다리는 중' : '날아가는 중', game.inWater ? '움직이면 줄을 거둬요.' : '');
   if (s === 'bite') set('입질이다! 지금 눌러요!', '빨리요, 도망가기 전에!');
@@ -1951,8 +2538,8 @@ function renderDex() {
 let rodShopKind = 'base';
 function renderRodShop() {
   const list = $('rodShopList');
-  $('rodShopTitle').textContent = rodShopKind === 'mountain' ? '언덕 위 낚싯대 상점' : '낚싯대 상점';
-  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${rodShopKind === 'mountain' ? ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요' : ''}</div>`;
+  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방' }[rodShopKind];
+  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요' }[rodShopKind] || ''}</div>`;
   const grid = document.createElement('div');
   grid.className = 'rodGrid';
   list.appendChild(grid);
@@ -2017,7 +2604,7 @@ function renderChart() {
     <table class="chart"><tr><th>희귀도</th><th>기본</th><th>지금</th><th>물고기 (못 잡은 건 ???)</th></tr>${rows}</table>
     <h3 class="chartH">이로치 (확률 높은 순)</h3>
     <table class="chart"><tr><th>이로치</th><th>기본</th><th>지금</th><th>가격</th></tr>${muts}</table>
-    <div class="count" style="margin-top:8px">이로치가 붙으면 절반 확률로 하나 더 굴려서 최대 2개까지 겹쳐요. 겹치면 색이 반반, 가격은 두 배율을 곱해요 (예: 골드 + 다이아 = 7.5배).</div>`;
+    <div class="count" style="margin-top:8px">이로치가 붙으면 절반 확률로 하나 더 굴려서 최대 2개까지 겹쳐요. 겹치면 색이 반반, 가격은 두 배율을 곱해요 (예: 골드 + 다이아 = 20배).</div>`;
 }
 function renderSell() {
   document.querySelectorAll('.sellTab').forEach((b) => b.classList.toggle('active', b.dataset.sell === sellTab));
@@ -2052,7 +2639,7 @@ function renderSell() {
 }
 
 // ---------- 창 열고 닫기 ----------
-const panels = () => [ui.dexPanel, ui.rodShopPanel, ui.sellPanel, $('setPanel'), $('cookPanel'), $('multiPanel')];
+const panels = () => [ui.dexPanel, ui.rodShopPanel, ui.sellPanel, $('setPanel'), $('cookPanel'), $('multiPanel'), $('dressPanel'), $('boatPanel')];
 const modalOpen = () => panels().some((p) => !p.classList.contains('hidden'));
 function openPanel(p) {
   panels().forEach((x) => x.classList.add('hidden'));
@@ -2163,7 +2750,10 @@ function interact() {
   const s = game.nearShop;
   if (!s || game.state === 'charging' || game.state === 'reeling') return;
   if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
-  if (s.kind === 'rod' || s.kind === 'rod2') { rodShopKind = s.kind === 'rod2' ? 'mountain' : 'base'; renderRodShop(); openPanel(ui.rodShopPanel); }
+  if (s.kind === 'dress') { openDress(); return; }
+  if (s.kind === 'boat') { renderBoatShop(); openPanel($('boatPanel')); return; }
+  if (s.kind === 'boatcall') { summonBoat(s.caller); return; }
+  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
   else { renderSell(); openPanel(ui.sellPanel); }
 }
 
@@ -2397,7 +2987,8 @@ function cast() {
   game.castStartedAt = performance.now();
   game.landed = false;
   game.castFlight = 700 + p * 400;
-  game.biteAt = performance.now() + game.castFlight + (2600 + Math.random() * 3800) * curRod().bite;
+  // 입질 속도: 낚싯대 x 물(귀한 물고기가 많은 곳일수록 늦게 와요)
+  game.biteAt = performance.now() + game.castFlight + (2600 + Math.random() * 3800) * curRod().bite * (wtr?.biteMul || 1);
   game.armSwingUntil = performance.now() + 450;
   bobber.position.copy(game.castStart);
   sfx.cast();
@@ -2476,6 +3067,22 @@ function pressStart() {
   // 던져 둔 상태에서 다시 누르면 줄을 거둬요
   else if (game.state === 'casting' && performance.now() > game.castStartedAt + game.castFlight) { game.holding = false; retract(); }
 }
+// =====================================================
+//  점프 (스페이스) — 땅에서 폴짝, 보트 위에서는 물가로 뛰어내려요
+// =====================================================
+const JUMP_GRAVITY = 24, JUMP_SPEED = 7.5;
+function jump() {
+  if (modalOpen() || game.jumping) return;
+  startAudio();
+  if (game.inBoat) { toggleBoat(); return; }  // 보트에서 뛰어내리기
+  if (game.swimming) return;                   // 물속에서는 못 뛰어요
+  if (game.sitting) return;                    // 앉아 있을 땐 먼저 일어나요 (WASD)
+  if (fishAnim && fishAnim.hold > 3) return;   // 큰 물고기 자랑하는 중
+  game.jumping = true;
+  game.jumpV = JUMP_SPEED;
+  game.jumpVX = game.jumpVZ = 0;
+  tone(520, 0.08, 'square', 0.04); tone(780, 0.1, 'square', 0.03, 0.04);
+}
 function pressEnd() {
   game.holding = false;
   if (game.state === 'charging') cast();
@@ -2505,6 +3112,9 @@ window.addEventListener('keydown', (e) => {
   if (mk) { keys[mk] = true; e.preventDefault(); }
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyB') toggleBag(); // 가방 열고 닫기
+  if (e.code === 'KeyV' && !e.repeat) toggleBoat(); // 보트 타기/내리기
+  // 달리기 켜기/끄기: Ctrl 을 한 번 눌렀다 떼요 (꾹 누른 채 W 를 누르면 브라우저 탭이 닫히니 조심!)
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) { e.preventDefault(); game.running = !game.running; $('runHud').classList.toggle('hidden', !game.running); }
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') && !e.repeat && opts.shiftLock) setShiftLock(!shiftLocked);
   // 숫자 키: 1 = 낚싯대, 2~9 = 물고기
   const dm = e.code.match(/^Digit([1-9])$/);
@@ -2512,7 +3122,13 @@ window.addEventListener('keydown', (e) => {
     const id = hotbarOrder()[Number(dm[1]) - 1];
     if (id !== undefined) toggleEquip(id);
   }
-  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) pressStart(); }
+  // 스페이스: 낚시하는 중(던지는 중·찌 띄운 중·입질·당기기)이면 낚시, 아니면 점프!
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (['charging', 'casting', 'bite', 'reeling', 'retracting'].includes(game.state)) pressStart();
+    else jump();
+  }
 });
 window.addEventListener('keyup', (e) => {
   const mk = moveKeyOf(e);
@@ -2558,17 +3174,18 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => { cam.dist = Math.min(18, Math.max(5, cam.dist + e.deltaY * 0.01)); }, { passive: true });
 
 // 걸어갈 수 있는 곳인지 확인
-const BOUNDS = { x0: -40, x1: 44, z0: -36, z1: 16 };
+const BOUNDS = { x0: -74, x1: 44, z0: -48, z1: 24 };
 const WADE = 0.32;  // 얕은 물에 들어가면 이만큼 잠겨요
 const SWIM = 1.05;  // 깊은 물에서 헤엄칠 때는 이만큼 잠겨요 (머리만 물 위로)
 const ISLAND_TOP = 0.25;
-const isSwimSpot = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && inLake(x, z) && !isShallow(x, z);
+const isSwimSpot = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && !onBridge2(x, z) && inLake(x, z) && !isShallow(x, z);
 // 발이 닿는 높이: 부두 / 계단 / 섬 / 깊은 물(수영) / 얕은 물 / 언덕 위 / 땅
 function groundY(x, z) {
   if (onDock(x, z)) return 0.26;
   if (onStairs(x, z)) return stairHeight(z) - 0.08;
   if (onIsland(x, z)) return ISLAND_TOP;
   if (onBridge(x, z)) return BRIDGE.y;
+  if (onBridge2(x, z)) return bridge2Y(x); // 오로라 강 돌다리
   const w = waterAt(x, z);
   if (w) return w.y - (isShallow(x, z) ? WADE : SWIM);
   if (onPlateau(x, z)) return PLATEAU_TOP;
@@ -2587,9 +3204,10 @@ function walkable(x, z, fromX, fromZ, noSwim = false) {
   }
   return true;
 }
-const isWading = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && inLake(x, z);
+const isWading = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && !onBridge2(x, z) && inLake(x, z);
 
 function updatePlayer(dt) {
+  if (game.inBoat && boat.group) { updateBoat(dt); return; } // 보트 타는 중
   let ix = 0, iz = 0;
   if (keys.KeyD || keys.ArrowRight) ix += 1;
   if (keys.KeyA || keys.ArrowLeft) ix -= 1;
@@ -2615,7 +3233,8 @@ function updatePlayer(dt) {
     let dx = fx * -iz + rx * ix, dz = fz * -iz + rz * ix;
     const len = Math.hypot(dx, dz);
     dx /= len; dz /= len;
-    const step = (game.swimming ? 3.0 : 4.6) * dt; // 헤엄칠 땐 조금 느려요
+    // 헤엄칠 땐 조금 느리고, 달리기(Ctrl)를 켜면 빨라요
+    const step = (game.swimming ? 3.0 : game.running ? 7.8 : 4.6) * dt;
     const p = person.position;
     if (walkable(p.x + dx * step, p.z, p.x, p.z)) p.x += dx * step;
     if (walkable(p.x, p.z + dz * step, p.x, p.z)) p.z += dz * step;
@@ -2625,7 +3244,7 @@ function updatePlayer(dt) {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       player.ry += diff * Math.min(1, dt * 12);
     }
-    player.walkT += dt * 9;
+    player.walkT += dt * (game.running && !game.swimming ? 14 : 9);
   }
   // 시프트 락 중에는 항상 카메라가 보는 쪽을 바라봐요 (게 걸음 가능)
   if (shiftLocked && game.state !== 'reeling') player.ry = cam.yaw;
@@ -2640,13 +3259,23 @@ function updatePlayer(dt) {
   }
   // 헤엄칠 땐 물결 따라 살짝 둥실둥실
   const bob = game.swimming ? Math.sin(performance.now() * 0.004) * 0.05 : 0;
-  person.position.y += (gy + bob - person.position.y) * Math.min(1, dt * 10);
+  if (game.jumping) {
+    // 점프 중: 위로 솟았다가 중력에 끌려 내려와요. 보트에서 뛰어내릴 땐 옆으로도 날아가요
+    const p = person.position;
+    if (game.jumpVX || game.jumpVZ) { p.x += game.jumpVX * dt; p.z += game.jumpVZ * dt; }
+    game.jumpV -= JUMP_GRAVITY * dt;
+    p.y += game.jumpV * dt;
+    if (game.jumpV < 0 && p.y <= gy + bob) { // 땅(또는 물)에 닿았어요
+      p.y = gy + bob; game.jumping = false; game.jumpVX = game.jumpVZ = 0;
+      if (game.swimming) plop(0.2, 0, 500, 200, 0.12);
+    }
+  } else person.position.y += (gy + bob - person.position.y) * Math.min(1, dt * 10);
   // 헤엄칠 땐 몸을 앞으로 눕혀요
   person.rotation.order = 'YXZ';
   const tilt = game.swimming ? (player.moving ? -0.55 : -0.15) : 0;
   person.rotation.x += (tilt - person.rotation.x) * Math.min(1, dt * 8);
   // 다리: 걸을 땐 성큼성큼, 헤엄칠 땐 빠르게 발장구
-  const swing = game.swimming ? Math.sin(performance.now() * 0.018) * 0.35 : player.moving ? Math.sin(player.walkT) * 0.6 : 0;
+  const swing = game.jumping ? 0.5 : game.swimming ? Math.sin(performance.now() * 0.018) * 0.35 : player.moving ? Math.sin(player.walkT) * 0.6 : 0; // 점프 땐 다리를 앞뒤로 벌려요
   hero.legs[0].rotation.x += (swing - hero.legs[0].rotation.x) * Math.min(1, dt * 15);
   hero.legs[1].rotation.x += (-swing - hero.legs[1].rotation.x) * Math.min(1, dt * 15);
   if (game.sitting) {
@@ -2663,7 +3292,7 @@ function updatePlayer(dt) {
   let shopD = Infinity;
   for (const s of shops) {
     const d = (person.position.x - s.pos.x) ** 2 + (person.position.z - s.pos.z) ** 2;
-    if (d < 2.4 * 2.4) { game.nearShop = s; shopD = d; }
+    if (d < 2.4 * 2.4 && d < shopD) { game.nearShop = s; shopD = d; } // 제일 가까운 곳으로
   }
   // 가까운 사람 찾기 (말 걸기). 상점보다 더 가까우면 사람이 먼저예요
   game.nearTalk = null;
@@ -2724,7 +3353,17 @@ function sayLine(n, text, ms = 6000) {
   n.talkUntil = now + ms;
   game.talk = { npc: n, text, until: now + ms };
   $('talkName').textContent = n.name;
-  $('talkText').textContent = text;
+  // 한 글자씩 타닥타닥 나와요
+  const tt = $('talkText');
+  clearInterval(sayLine.timer);
+  let i = 0;
+  tt.textContent = '';
+  sayLine.timer = setInterval(() => {
+    i++;
+    tt.textContent = text.slice(0, i);
+    if (i % 3 === 1) tone(900 + Math.random() * 200, 0.03, 'square', 0.012); // 톡톡 소리
+    if (i >= text.length) clearInterval(sayLine.timer);
+  }, 32);
   const el = $('talkLine');
   el.classList.remove('hidden');
   el.style.animation = 'none';
@@ -2736,7 +3375,7 @@ const josa = (word, a, b) => {
   const c = word.charCodeAt(word.length - 1);
   return word + (c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 ? a : b);
 };
-const whereOf = (f) => (f.weather === 'rain' ? '비 오는 날 큰 호수' : fishZone(f) === 'mountain' ? '산 위 연못' : '큰 호수');
+const whereOf = (f) => (f.weather === 'rain' ? '비 오는 날 큰 호수' : fishZone(f) === 'mountain' ? '산 위 연못' : fishZone(f) === 'aurora' ? '오로라 강' : '큰 호수');
 
 // =====================================================
 //  고수 할배의 부탁 — 물고기를 잡아다 주면 보상을 줘요
@@ -3313,6 +3952,20 @@ function animate(now) {
     }
   }
   placeSpin(rodSpin, t);
+  // 오로라 강: 등불이 둥실둥실, 하늘 오로라가 물결치고, 풍차가 돌아요
+  for (const l of auroraFX.lanterns) {
+    const u = l.userData;
+    l.position.y = u.base.y + Math.sin(t * 1.1 + u.ph) * 0.15;
+    l.position.x = u.base.x + Math.sin(t * 0.3 + u.ph) * 0.4;
+    l.rotation.y = t * 0.4 + u.ph;
+  }
+  for (const r of auroraFX.ribbons) {
+    const arr = r.geometry.attributes.position.array, b = r.userData.base;
+    for (let i = 0; i < arr.length; i += 3) arr[i + 2] = Math.sin(b[i] * 0.06 + t * 0.5 + r.userData.ph) * 6 + Math.sin(b[i] * 0.15 + t * 0.9) * 1.5;
+    r.geometry.attributes.position.needsUpdate = true;
+    r.material.opacity = 0.12 + stars.material.opacity * 0.45; // 밤에 더 진하게
+  }
+  if (auroraFX.blades) auroraFX.blades.rotation.z += dt * 0.6;
   // 모닥불 일렁일렁
   campfire.flames.forEach((f, i) => {
     const k = 1 + Math.sin(t * (9 + i * 3) + i) * 0.12 + Math.sin(t * 23 + i * 2) * 0.06;
@@ -3325,11 +3978,15 @@ function animate(now) {
     if (c.position.x > 130) c.position.x = -130;
   }
   shopRodSpins.forEach((s) => placeSpin(s, t));
+  // 공방 앞 전시대: 낚싯대가 천천히 돌고 살짝 떠올라요
+  for (const d of displayRods) { d.holder.rotation.y = t * 0.6 + d.ph; d.holder.position.y = 0.72 + ROD_LEN / 2 * 1.05 + Math.sin(t * 1.2 + d.ph) * 0.06; placeSpin(d.sp, t); }
 
   updateNPCs(now, dt, t);
   updateWalkers(now, dt, t);
   multi.update(now, dt, t);
   updateWade(t);
+  updateShopBoats(t);
+  updateDressCam();
   updateCamera();
   updatePrompt();
   updateBubble();
@@ -3369,6 +4026,7 @@ window.__game = { scene, camera, renderer, player: person, fishingLine, bobber, 
 // 지금 내 모습: 위치, 방향, 동작, 낚싯대, 손에 든 물고기, 찌 위치, 잡은 수
 function myAnim() {
   if (game.sitting) return 'sit';
+  if (game.inBoat && !['charging', 'casting', 'bite', 'reeling'].includes(game.state)) return 'sit';
   if (game.swimming) return 'swim';
   const s = game.state;
   if (s === 'charging') return 'charge';
@@ -3385,7 +4043,7 @@ function getMyState() {
   const r2 = (v) => Math.round(v * 100) / 100;
   return {
     x: r2(p.x), y: r2(p.y), z: r2(p.z), r: r2(player.ry), a: myAnim(),
-    rod: game.rodOut ? save.rod : -1, f: held ? held.name : null, m: held ? held.mut : null, n: save.caught,
+    rod: game.rodOut ? save.rod : -1, f: held ? held.name : null, m: held ? held.mut : null, n: save.caught, bt: game.inBoat ? save.boat : -1,
     b: bobber.visible ? [r2(bobber.position.x), r2(bobber.position.y), r2(bobber.position.z)] : null
   };
 }
@@ -3402,7 +4060,7 @@ function pushFeed(text) {
 }
 const multi = setupMulti({
   THREE, scene, makeBlockPerson, buildRod, placeSpin, RODS, ROD_LEN, makeBobber, cordMat, makeNameTag,
-  makeFishModel, findFish, fishScale, getMyState, onFeed: pushFeed,
+  makeFishModel, findFish, fishScale, getMyState, onFeed: pushFeed, outfitToLook, makeBoatModel, getOutfit: () => save.outfit,
   onStatus: (text, ok, info) => {
     $('multiStatus').textContent = text;
     $('multiStatus').className = 'multiStatus' + (ok ? ' ok' : '');
@@ -3482,7 +4140,221 @@ $('saveLoadCode').addEventListener('click', () => {
 // 이름·방 코드 칸에 글자를 칠 땐 게임 조작(WASD 등)이 안 되게
 ['multiName', 'multiRoom', 'saveCodeBox'].forEach((id) => { const el = $(id); if (el) el.addEventListener('keydown', (e) => e.stopPropagation()); });
 
+// =====================================================
+//  탈의실 — 옷과 액세서리를 바꾸면 주인공을 새로 만들어요
+// =====================================================
+function rebuildHero(outfit) {
+  const nh = makeBlockPerson(outfitToLook(outfit));
+  nh.group.scale.setScalar(1.2);
+  nh.group.position.copy(person.position);
+  nh.group.rotation.copy(person.rotation);
+  // 낚싯대 · 머리 위 숫자 · 손에 든 물고기를 새 몸으로 옮겨요
+  hero.armR.remove(rod); nh.armR.add(rod);
+  person.remove(tag); nh.group.add(tag);
+  if (heldFish) { person.remove(heldFish); nh.group.add(heldFish); }
+  nh.armL.rotation.copy(hero.armL.rotation);
+  nh.armR.rotation.copy(hero.armR.rotation);
+  scene.remove(person);
+  scene.add(nh.group);
+  hero = nh;
+  person = nh.group;
+  if (window.__game) window.__game.player = person;
+}
+let dressCam = null;
+function openDress() {
+  renderDress();
+  openPanel($('dressPanel'));
+  // 카메라를 내 얼굴 쪽으로 돌려서 옷을 잘 보게 해요
+  dressCam = { yaw: cam.yaw, dist: cam.dist, pitch: cam.pitch };
+  cam.yaw = player.ry + Math.PI * 0.85; cam.dist = 6; cam.pitch = 0.25;
+}
+function setOutfit(key, val) {
+  save.outfit = cleanOutfit({ ...save.outfit, [key]: val });
+  writeSave();
+  rebuildHero(save.outfit);
+  multi.sendOutfit(save.outfit);
+  renderDress();
+}
+function renderDress() {
+  const o = save.outfit;
+  const box = $('dressList');
+  let html = '';
+  for (const [k, spec] of Object.entries(OUTFIT_OPTS)) {
+    html += `<div class="dressRow"><div class="nm">${spec.label}</div><div class="dressOpts">${spec.names.map((n, i) =>
+      `<button class="optBtn${o[k] === i ? ' on' : ''}" data-k="${k}" data-v="${i}">${n}</button>`).join('')}</div></div>`;
+  }
+  for (const [k, label] of OUTFIT_COLOR_PARTS) {
+    const none = OPTIONAL_PARTS.has(k) ? `<button class="sw none${o[k] === -1 ? ' on' : ''}" data-k="${k}" data-v="-1" title="없음">✕</button>` : '';
+    html += `<div class="dressRow"><div class="nm">${label}</div><div class="dressOpts">${none}${OUTFIT_COLORS.map((c, i) =>
+      `<button class="sw${o[k] === i ? ' on' : ''}" data-k="${k}" data-v="${i}" style="background:#${c.toString(16).padStart(6, '0')}"></button>`).join('')}</div></div>`;
+  }
+  html += `<div class="saveBtns" style="margin-top:6px"><button class="actBtn" id="dressReset">처음 옷으로</button></div>`;
+  box.innerHTML = html;
+  box.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => setOutfit(b.dataset.k, Number(b.dataset.v))));
+  $('dressReset').addEventListener('click', () => { save.outfit = { ...DEFAULT_OUTFIT }; writeSave(); rebuildHero(save.outfit); multi.sendOutfit(save.outfit); renderDress(); });
+}
+// 탈의실 창이 닫히면 카메라를 원래대로
+let dressShift = 0; // 탈의실 창만큼 화면을 옆(또는 위)으로 밀어 둔 정도
+function updateDressCam() {
+  const panel = $('dressPanel');
+  if (dressCam && panel.classList.contains('hidden')) {
+    cam.yaw = dressCam.yaw; cam.dist = dressCam.dist; cam.pitch = dressCam.pitch;
+    dressCam = null;
+  }
+  // 옷 갈아입는 동안: 창이 캐릭터를 가리지 않게, 창이 없는 쪽 한가운데에 캐릭터가 오도록 화면을 밀어요
+  //  넓은 화면 = 창이 오른쪽 → 캐릭터를 왼쪽으로 / 좁은 화면 = 창이 아래 → 캐릭터를 위로
+  let want = 0, vertical = false;
+  if (dressCam) {
+    const r = panel.querySelector('.modalBox').getBoundingClientRect();
+    vertical = innerWidth < 700;
+    want = vertical ? (innerHeight - r.top) / 2 : (innerWidth - r.left) / 2;
+  }
+  dressShift += (want - dressShift) * 0.2; // 부드럽게 미끄러지듯
+  if (Math.abs(dressShift) < 0.5 && !dressCam) {
+    if (camera.view && camera.view.enabled) camera.clearViewOffset();
+    dressShift = 0;
+    return;
+  }
+  camera.setViewOffset(innerWidth, innerHeight, vertical ? 0 : dressShift, vertical ? dressShift : 0, innerWidth, innerHeight);
+}
+
+// =====================================================
+//  보트 — 보트 상점에서 사고, 보트 관리인한테 E 키로 불러 타고, 스페이스(점프)로 뛰어내려요
+// =====================================================
+const boat = { group: null, type: -1, x: 0, z: 0, ry: 0, speed: 0 };
+function renderBoatShop() {
+  const list = $('boatList');
+  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)} · 옆에 있는 보트 관리인한테 <b>E</b> 키를 누르면 보트를 불러 줘요. 내릴 땐 <b>스페이스</b>로 폴짝! 보트 위에서도 낚시할 수 있어요!</div>`;
+  BOAT_TYPES.forEach((b, i) => {
+    const owned = save.boats.includes(i);
+    const row = document.createElement('div');
+    row.className = 'rodRow';
+    row.innerHTML = `<div class="info"><div class="nm">${b.name}</div><div class="ds">${b.desc}</div><div class="stat"><span>속도</span><div class="bar"><i style="width:${Math.round(b.speed / 10 * 100)}%"></i></div><span class="v">${b.speed}</span></div></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'actBtn';
+    if (!owned) {
+      btn.textContent = money(b.price);
+      btn.disabled = save.money < b.price;
+      btn.onclick = () => {
+        if (save.money < b.price) return;
+        save.money -= b.price; save.boats.push(i); save.boat = i;
+        writeSave(); updateUI(); renderBoatShop(); sfx.coin();
+      };
+    } else if (save.boat === i) { btn.textContent = '타는 중'; btn.disabled = true; }
+    else { btn.textContent = '이걸로 타기'; btn.onclick = () => { save.boat = i; writeSave(); if (boat.group) removeBoat(); renderBoatShop(); }; }
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
+const boatWaterOK = (x, z) => inLake(x, z) && !onIsland(x, z) && !onDock(x, z) && !onBridge(x, z) && !onBridge2(x, z);
+function removeBoat() { if (boat.group) scene.remove(boat.group); boat.group = null; game.inBoat = false; }
+function spawnBoat(x, z, ry) {
+  removeBoat();
+  boat.type = save.boat;
+  boat.group = makeBoatModel(save.boat);
+  boat.x = x; boat.z = z; boat.ry = ry; boat.speed = 0;
+  scene.add(boat.group);
+  placeBoat(0);
+}
+function placeBoat(t) {
+  const w = waterAt(boat.x, boat.z);
+  const y = (w ? w.y : 0.02) + Math.sin(t * 1.6) * 0.03;
+  boat.group.position.set(boat.x, y, boat.z);
+  boat.group.rotation.set(Math.sin(t * 1.3) * 0.02, boat.ry, Math.sin(t * 1.1) * 0.03);
+}
+function toggleBoat() {
+  if (game.inBoat) {
+    // 내리기: 근처 땅(또는 얕은 물)을 찾아서 내려요. 없으면 옆 물속으로 풍덩
+    let spot = null;
+    for (let r = 1.6; r <= 3.2 && !spot; r += 0.4) for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2, x = boat.x + Math.cos(a) * r, z = boat.z + Math.sin(a) * r;
+      if (walkable(x, z) && !isSwimSpot(x, z)) { spot = { x, z }; break; }
+    }
+    if (!spot) spot = { x: boat.x + Math.cos(boat.ry) * 1.4, z: boat.z - Math.sin(boat.ry) * 1.4 };
+    if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+    game.inBoat = false;
+    // 폴짝 뛰어내려요: 보트 자리에서 출발해서, 땅에 닿는 시간에 맞춰 옆으로 날아가요
+    const p = person.position, ty = groundY(spot.x, spot.z);
+    const tFly = (JUMP_SPEED + Math.sqrt(JUMP_SPEED ** 2 + 2 * JUMP_GRAVITY * Math.max(0, p.y - ty))) / JUMP_GRAVITY;
+    game.jumping = true;
+    game.jumpV = JUMP_SPEED;
+    game.jumpVX = (spot.x - p.x) / tFly;
+    game.jumpVZ = (spot.z - p.z) / tFly;
+    player.ry = Math.atan2(p.x - spot.x, p.z - spot.z); // 뛰는 쪽을 바라봐요
+    hero.legs.forEach((l) => (l.rotation.x = 0));
+    tone(520, 0.08, 'square', 0.04); tone(780, 0.1, 'square', 0.03, 0.04);
+    return;
+  }
+  if (save.boat < 0) { game.notice = '보트 상점(호숫가)에서 보트를 먼저 사요.'; updateUI(); return; }
+  if (game.state === 'charging' || game.state === 'reeling') return;
+  const p = person.position;
+  // 띄워 둔 내 보트가 가까이 있을 때만 V 로 다시 탈 수 있어요. 새로 띄우는 건 보트 관리인이 해 줘요
+  if (!(boat.group && boat.type === save.boat && Math.hypot(boat.x - p.x, boat.z - p.z) < 3.2)) {
+    game.notice = '호숫가의 보트 관리인(보트 상점 옆, 호수 건너편)한테 가서 E 키를 누르면 보트를 불러 줘요.'; updateUI(); return;
+  }
+  boardBoat();
+}
+// 보트 관리인한테 E: 앞 물에 내 보트를 띄우고 바로 태워 줘요 (전에 띄운 보트는 사라져요)
+function summonBoat(c) {
+  if (game.inBoat) return;
+  if (save.boat < 0) { game.notice = '보트가 없어요. 옆 보트 상점에서 먼저 사 와요!'; updateUI(); return; }
+  if (game.state === 'charging' || game.state === 'reeling') return;
+  spawnBoat(c.wx, c.wz, Math.atan2(c.x - c.wx, c.z - c.wz)); // 뱃머리가 호수 쪽 (보트 앞은 -z)
+  boardBoat();
+  sfx.coin();
+}
+// 보트에 올라타기
+function boardBoat() {
+  if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+  game.inBoat = true;
+  game.swimming = false;
+  game.sitting = null;
+  game.notice = `${BOAT_TYPES[save.boat].name}에 탔어요! WASD 로 움직이고, 스페이스로 뛰어내려요.`;
+  updateUI();
+  plop(0.18, 0, 700, 300, 0.1);
+}
+// 보트 타는 중: 방향키로 움직이고 주인공은 보트에 앉아요
+function updateBoat(dt) {
+  let ix = 0, iz = 0;
+  if (keys.KeyD || keys.ArrowRight) ix += 1;
+  if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+  if (keys.KeyS || keys.ArrowDown) iz += 1;
+  if (keys.KeyW || keys.ArrowUp) iz -= 1;
+  const canMove = !modalOpen() && game.state !== 'charging' && game.state !== 'reeling';
+  player.moving = canMove && (ix !== 0 || iz !== 0);
+  const bt = BOAT_TYPES[boat.type];
+  let target = 0;
+  if (player.moving) {
+    if (game.state === 'casting' || game.state === 'bite') retract();
+    const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+    let dx = fx * -iz + rx * ix, dz = fz * -iz + rz * ix;
+    const len = Math.hypot(dx, dz); dx /= len; dz /= len;
+    let diff = Math.atan2(-dx, -dz) - boat.ry;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    boat.ry += diff * Math.min(1, dt * 2.6);             // 배는 천천히 돌아요
+    target = bt.speed * (game.running ? 1.25 : 1) * Math.max(0.2, Math.cos(diff));
+  }
+  boat.speed += (target - boat.speed) * Math.min(1, dt * 1.8); // 천천히 출발하고 미끄러지듯 멈춰요
+  const nx = boat.x - Math.sin(boat.ry) * boat.speed * dt, nz = boat.z - Math.cos(boat.ry) * boat.speed * dt;
+  if (boatWaterOK(nx, nz)) { boat.x = nx; boat.z = nz; } else boat.speed *= 0.3; // 물가에 닿으면 멈칫
+  const t = performance.now() * 0.001;
+  placeBoat(t);
+  // 주인공: 보트 자리에 앉기
+  const seatY = boat.group.position.y + (boat.type === 1 ? 0.48 : 0.38) - 0.6;
+  person.position.set(boat.x + Math.sin(boat.ry) * 0.25, seatY, boat.z + Math.cos(boat.ry) * 0.25);
+  player.ry = shiftLocked ? cam.yaw : boat.ry;
+  person.rotation.set(0, player.ry, 0);
+  hero.legs.forEach((l) => (l.rotation.x = Math.PI / 2));
+  if (player.moving) player.walkT += dt * 6;
+  game.nearShop = null; game.nearTalk = null; game.nearFire = false;
+}
+function updateShopBoats(t) {
+  for (const b of shopBoats) { b.m.position.y = LAKE.y + Math.sin(t * 1.4 + b.ph) * 0.03; b.m.rotation.z = Math.sin(t * 1.1 + b.ph) * 0.03; }
+  if (boat.group && !game.inBoat) placeBoat(t); // 세워 둔 보트도 살랑살랑
+}
+
 applyRod();
+rebuildHero(save.outfit); // 저장해 둔 옷 입기
 renderHotbar();
 updateQuestHud();
 updateUI();

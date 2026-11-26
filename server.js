@@ -192,8 +192,16 @@ function cleanState(s) {
   return {
     x: num(s.x, -200, 200), y: num(s.y, -5, 30), z: num(s.z, -200, 200), r: num(s.r, -100, 100),
     a: ANIMS.has(s.a) ? s.a : 'idle', rod: Math.floor(num(s.rod, -1, 30)),
-    f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 16) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob
+    f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 16) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob, bt: s.bt == null ? -1 : Math.floor(num(s.bt, -1, 5))
   };
+}
+// 옷차림: 정해진 칸에 숫자만 받아요
+const OUTFIT_KEYS = ['hat', 'hatC', 'hair', 'hairC', 'glasses', 'beard', 'shirt', 'pants', 'vest', 'scarf', 'backpack', 'flower'];
+function cleanOutfitMsg(o) {
+  if (!o || typeof o !== 'object') return null;
+  const r = {};
+  for (const k of OUTFIT_KEYS) if (o[k] != null) r[k] = Math.floor(num(o[k], -1, 40)); // 없는 칸은 비워 둬요 (기본 옷으로)
+  return r;
 }
 
 function handle(c, msg) {
@@ -207,13 +215,14 @@ function handle(c, msg) {
     c.name = clean(msg.name, 12) || '낚시꾼';
     c.look = Math.floor(num(msg.look, 0, 20));
     c.state = cleanState(msg.s);
+    c.outfit = cleanOutfitMsg(msg.o);
     c.room = room;
     set.add(c);
     rooms.set(room, set);
     // 나에게: 내 번호와 이미 있는 사람들 / 다른 사람들에게: 새로 온 나
-    const others = [...set].filter((o) => o !== c).map((o) => ({ id: o.id, name: o.name, look: o.look, s: o.state }));
+    const others = [...set].filter((o) => o !== c).map((o) => ({ id: o.id, name: o.name, look: o.look, o: o.outfit, s: o.state }));
     wsSend(c.sock, JSON.stringify({ t: 'welcome', id: c.id, room, max: MAX_PER_ROOM, players: others }));
-    broadcast(room, { t: 'join', id: c.id, name: c.name, look: c.look, s: c.state }, c);
+    broadcast(room, { t: 'join', id: c.id, name: c.name, look: c.look, o: c.outfit, s: c.state }, c);
     return;
   }
   if (!c.room) return;
@@ -223,6 +232,10 @@ function handle(c, msg) {
   } else if (msg.t === 'catch') {
     // 잡은 물고기 소식: 이름·이로치·무게만 전해요
     broadcast(c.room, { t: 'catch', id: c.id, f: clean(msg.f, 20), m: msg.m ? clean(msg.m, 16) : null, w: num(msg.w, 0, 10000) }, c);
+  } else if (msg.t === 'outfit') {
+    // 탈의실에서 옷을 바꿨어요
+    c.outfit = cleanOutfitMsg(msg.o);
+    if (c.outfit) broadcast(c.room, { t: 'outfit', id: c.id, o: c.outfit }, c);
   } else if (msg.t === 'leave') {
     leave(c);
   }

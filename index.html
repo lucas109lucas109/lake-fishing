@@ -25,6 +25,7 @@
     <div id="money">$0</div>
     <div class="rodName">낚싯대 · <b id="rodName">기본 낚싯대</b></div>
     <div id="clock" class="rodName">노을 · 18:30</div>
+    <div id="runHud" class="hudLine run hidden">달리는 중 (Ctrl 로 끄기)</div>
     <div id="buffLine" class="hudLine buff hidden"></div>
     <div id="questLine" class="hudLine quest hidden"></div>
     <button id="dexBtn" class="smallBtn">도감 (Q)</button>
@@ -32,7 +33,7 @@
     <button id="multiBtn" class="smallBtn">멀티</button>
     <div id="multiHud" class="hudLine hidden"></div>
   </div>
-  <div id="keys">WASD 이동 · 오른쪽 드래그 화면 회전 · Shift 시프트 락 · 휠 확대 · 클릭/스페이스 낚시 · E 상호작용 · 1~9 인벤토리</div>
+  <div id="keys">WASD 이동 · R 달리기 · 오른쪽 드래그 화면 회전 · Shift 시프트 락 · 휠 확대 · 클릭 낚시 · 스페이스 점프 · E 상호작용 · 1~9 인벤토리</div>
   <div id="lockDot" class="hidden"></div>
   <div id="lockHint" class="hidden"></div>
 
@@ -46,6 +47,21 @@
   </div>
 
   <!-- 설정 창 -->
+  <div id="dressPanel" class="modal side hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>탈의실 · 옷 갈아입기</span><button class="closeBtn" data-close="dressPanel">닫기</button></div>
+      <div class="count">고르면 바로 입어져요. 거울(화면)에 비친 내 모습을 보면서 골라 보세요.</div>
+      <div id="dressList"></div>
+    </div>
+  </div>
+
+  <div id="boatPanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>보트 상점</span><button class="closeBtn" data-close="boatPanel">닫기</button></div>
+      <div id="boatList"></div>
+    </div>
+  </div>
+
   <div id="setPanel" class="modal hidden">
     <div class="modalBox">
       <div class="modalHead"><span>설정</span><button class="closeBtn" data-close="setPanel">닫기</button></div>
@@ -85,8 +101,8 @@
       <div class="setRow col">
         <div class="nm">내 이름</div>
         <input id="multiName" class="textIn" maxlength="12" placeholder="12글자까지">
-        <div class="nm">옷 색</div>
-        <div id="multiLooks" class="looks"></div>
+        <div class="ds">내 옷차림은 탈의실(마을 왼쪽 분홍 집)에서 바꾼 그대로 다른 사람에게 보여요.</div>
+        <div id="multiLooks" class="looks hidden"></div>
         <div class="nm">방 코드</div>
         <input id="multiRoom" class="textIn" maxlength="8" placeholder="PLAZA">
         <div class="ds">친구와 같은 방 코드를 쓰면 같은 호수에서 만나요. (영어 대문자·숫자 3~8글자, 기본: PLAZA = 광장)</div>
@@ -101,6 +117,9 @@
   </div>
 
   <!-- 왼쪽 아래 소식 -->
+  <!-- NPC 대화창: 화면 아래쪽에 크게 떠요 -->
+  <div id="talkLine" class="hidden"><b id="talkName"></b><span id="talkText"></span><i class="talkMore"></i></div>
+
   <div id="feed"></div>
 
   <!-- 가끔 떠오르는 낭만 있는 말 -->
@@ -135,7 +154,6 @@
 
   <!-- 안내 글 -->
   <div id="statusBox">
-    <div id="talkLine" class="hidden"><b id="talkName"></b><span id="talkText"></span></div>
     <div id="status"></div>
     <div id="hint"></div>
   </div>

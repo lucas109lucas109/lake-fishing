@@ -114,18 +114,36 @@ export const FISH = [
   { name: '황금 왕관 잉어', zone: 'mountain', rarity: 'mythic', w: [30, 80], perKg: 60, huge: true,
     look: { L: 1.3, h: 0.44, w: 0.24, color: 0xf2b830, belly: 0xffe08a, fin: 0xe08a20, whiskers: true, crown: true, iris: 0xffffff, glow: [0xffd84a], size: 3.4 } }
 ];
+// =========== 오로라 강 (큰 호수 서쪽) — 화면을 가릴 만큼 거대한 물고기들 (zone: 'aurora') ===========
+FISH.push(
+  { name: '오로라 연어', zone: 'aurora', rarity: 'common', w: [8, 30], perKg: 8,
+    look: { L: 1.3, h: 0.32, w: 0.18, color: 0x5ad0c0, belly: 0xe0fff8, fin: 0xb48cff, pattern: 'spots', pc: 0xe8d0ff, blush: 0xff9ad8, iris: 0xd8fff4, glow: [0xe8d0ff], size: 3.0 } },
+  { name: '수정 비늘 잉어', zone: 'aurora', rarity: 'common', w: [10, 40], perKg: 7,
+    look: { L: 1.2, h: 0.42, w: 0.24, color: 0x8ab8e0, belly: 0xe8f4ff, fin: 0x6a8ad8, whiskers: true, crystals: 0xb8f0ff, iris: 0xffffff, glow: [0xb8f0ff], size: 3.4 } },
+  { name: '별무리 가오리', zone: 'aurora', rarity: 'uncommon', w: [80, 400], perKg: 2.5,
+    look: { ray: true, L: 1.0, h: 0.12, w: 1.3, color: 0x24305a, belly: 0xe8eeff, fin: 0x3a4a8a, pc: 0xfff6c8, glow: [0xfff6c8], size: 6.0 } },
+  { name: '심연 아귀', zone: 'aurora', rarity: 'rare', w: [30, 150], perKg: 6,
+    look: { angler: true, L: 1.1, h: 0.62, w: 0.6, color: 0x2a2440, belly: 0x4a3a5a, fin: 0x1a1428, pc: 0x7affe8, iris: 0xffe23a, glow: [0x7affe8, 0xffe23a], size: 5.0 } },
+  { name: '고대 실러캔스', zone: 'aurora', rarity: 'rare', w: [40, 120], perKg: 7,
+    look: { L: 1.4, h: 0.4, w: 0.26, color: 0x2a4a7a, belly: 0x5a7aa8, fin: 0x1a3460, pattern: 'spots', pc: 0xf0f4ff, bigHead: true, smooth: true, iris: 0xffd84a, size: 5.5 } },
+  { name: '빛나는 고래상어', zone: 'aurora', rarity: 'legendary', w: [900, 3000], perKg: 1.2,
+    look: { L: 2.0, h: 0.5, w: 0.5, color: 0x2a3a4e, belly: 0xd8e0e8, fin: 0x24323f, pattern: 'spots', pc: 0xbfffff, bigHead: true, smooth: true, glow: [0xbfffff], iris: 0xffffff, size: 8.5 } },
+  { name: '오로라 리바이어던', zone: 'aurora', rarity: 'mythic', w: [2000, 6000], perKg: 1.5, huge: true,
+    look: { serpent: true, L: 3.0, h: 0.34, w: 0.3, color: 0x1a2a5a, belly: 0x7af0d0, fin: 0xb46cff, pc: 0x7affd0, iris: 0xff6ad8, glow: [0x7affd0, 0xb46cff, 0xff6ad8], size: 6.0 } }
+);
+
 // 물고기가 사는 곳: 'lake'(큰 호수·개울) 또는 'mountain'(산 위 연못)
 export const zoneOf = (f) => f.zone || 'lake';
 
 // 이로치 (색이 다른 특별한 물고기)
 // chance = 붙을 확률, mult = 가격 배율, tint = 바뀌는 색
 export const MUTATIONS = [
-  { name: '골드',   color: '#ffcf3f', chance: 0.10, mult: 1.5, tint: 0xffd84a, mix: 0.88, metal: 0.3, rough: 0.3, glow: 0xb08000, gi: 0.45 },
-  { name: '다크',   color: '#a07cff', chance: 0.06, mult: 1.8, tint: 0x1c1428, mix: 0.85, metal: 0.2, rough: 0.4, glow: 0x5a2aa8, gi: 0.45 },
-  { name: '화이트', color: '#f4f4f4', chance: 0.05, mult: 2.0, tint: 0xf6f6f2, mix: 0.85, metal: 0.05, rough: 0.5, glow: 0x000000, gi: 0 },
-  { name: '핏빛',   color: '#ff4a4a', chance: 0.03, mult: 2.5, tint: 0x9a0f18, mix: 0.8, metal: 0.2, rough: 0.35, glow: 0x8a0010, gi: 0.4 },
-  { name: '알비노', color: '#ffc4d0', chance: 0.02, mult: 3.0, tint: 0xffe6ea, mix: 0.88, metal: 0, rough: 0.5, glow: 0x000000, gi: 0, eye: 0xd8202a },
-  { name: '다이아', color: '#9ff3ff', chance: 0.01, mult: 5.0, tint: 0xd8faff, mix: 0.85, metal: 0.2, rough: 0.05, glow: 0x3ad8ff, gi: 0.5, clear: true }
+  { name: '골드',   color: '#ffcf3f', chance: 0.10, mult: 2.0, tint: 0xffd84a, mix: 0.88, metal: 0.3, rough: 0.3, glow: 0xb08000, gi: 0.45 },
+  { name: '다크',   color: '#a07cff', chance: 0.06, mult: 2.5, tint: 0x1c1428, mix: 0.85, metal: 0.2, rough: 0.4, glow: 0x5a2aa8, gi: 0.45 },
+  { name: '화이트', color: '#f4f4f4', chance: 0.05, mult: 3.0, tint: 0xf6f6f2, mix: 0.85, metal: 0.05, rough: 0.5, glow: 0x000000, gi: 0 },
+  { name: '핏빛',   color: '#ff4a4a', chance: 0.03, mult: 4.0, tint: 0x9a0f18, mix: 0.8, metal: 0.2, rough: 0.35, glow: 0x8a0010, gi: 0.4 },
+  { name: '알비노', color: '#ffc4d0', chance: 0.02, mult: 6.0, tint: 0xffe6ea, mix: 0.88, metal: 0, rough: 0.5, glow: 0x000000, gi: 0, eye: 0xd8202a },
+  { name: '다이아', color: '#9ff3ff', chance: 0.01, mult: 10.0, tint: 0xd8faff, mix: 0.85, metal: 0.2, rough: 0.05, glow: 0x3ad8ff, gi: 0.5, clear: true }
 ];
 
 export function findFish(name) {
@@ -146,7 +164,7 @@ export function mutList(str) {
   }
   return out;
 }
-// 가격 배율: 겹치면 곱해요 (골드 1.5 x 다이아 5 = 7.5배)
+// 가격 배율: 겹치면 곱해요 (골드 2 x 다이아 10 = 20배)
 export const mutMult = (str) => mutList(str).reduce((k, m) => k * m.mult, 1);
 // 저장용 깨끗한 문자열 (없으면 null)
 export const mutKey = (str) => mutList(str).map((m) => m.name).join('+') || null;
@@ -285,7 +303,60 @@ export function makeFishModel(f, mutName, weight) {
     add(e * 0.22, 0.01, e * 0.22, SHINE, x + e * 0.24, y + 0.015, z - e * 0.18);
   };
 
-  if (o.puffer) {
+  if (o.ray) {
+    // 별무리 가오리: 넓적한 마름모 날개 + 긴 꼬리 + 등에 별무늬
+    add(L * 0.6, H, W * 0.5, o.color, 0, 0, 0);
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const span = W * (0.5 - i * 0.1);
+        add(L * (0.55 - i * 0.1), H * 0.8, span * 0.5, o.color, -i * L * 0.03, -i * H * 0.03, s * (W * 0.25 + span * 0.25 + i * W * 0.02));
+      }
+      add(L * 0.18, H * 0.6, W * 0.08, o.fin, L * 0.3, 0, s * W * 0.1, 0, s * 0.4, 0); // 머리 지느러미(뿔)
+      add(0.06, 0.06, 0.06, EYE, L * 0.28, H * 0.5, s * W * 0.12);
+    }
+    add(L * 0.58, 0.01, W * 1.2, o.belly, 0, -H / 2 - 0.006, 0);
+    add(L * 0.9, H * 0.25, H * 0.25, o.color, -L * 0.7, 0, 0);       // 긴 꼬리
+    for (let i = 0; i < 16; i++) {
+      const x = (-0.25 + ((i * 0.37) % 0.5)) * L, z = (((i * 0.61) % 1) - 0.5) * W * 0.9;
+      add(0.05, 0.012, 0.05, o.pc, x, H / 2 + 0.005, z);
+    }
+  } else if (o.angler) {
+    // 심연 아귀: 커다란 머리와 이빨, 머리 위 빛나는 초롱
+    add(L * 0.75, H, W, o.color, 0, 0, 0);
+    add(L * 0.3, H * 1.05, W * 1.05, o.color, L * 0.35, H * 0.02, 0);
+    add(L * 0.65, H * 0.3, W * 1.02, o.belly, 0, -H * 0.36, 0);
+    add(L * 0.1, H * 0.45, W * 0.9, 0x120a18, L * 0.52, -H * 0.12, 0);       // 쩍 벌린 입
+    for (let i = 0; i < 6; i++) for (const yy of [1, -1]) {
+      add(L * 0.02, H * 0.12, L * 0.02, 0xf4f0e0, L * 0.56, yy * H * 0.06 - H * 0.12, (i - 2.5) * W * 0.15, 0, 0, yy > 0 ? Math.PI : 0); // 뾰족 이빨
+    }
+    add(L * 0.04, H * 0.04, L * 0.5, o.fin, L * 0.28, H * 0.65, 0, 0, Math.PI / 2, 0.9);  // 초롱대
+    add(H * 0.22, H * 0.22, H * 0.22, o.pc, L * 0.62, H * 0.82, 0, 0, Math.PI / 4, Math.PI / 4); // 빛나는 초롱
+    add(L * 0.14, H * 0.6, W * 0.14, o.fin, -L * 0.45, 0, 0);
+    for (const s of [-1, 1]) {
+      eyeSide(L * 0.4, H * 0.28, s * (W * 0.53 + 0.01), s, H * 0.16);
+      add(L * 0.14, H * 0.3, 0.02, o.fin, L * 0.05, -H * 0.2, s * (W / 2 + 0.01), 0, 0, -0.5);
+    }
+  } else if (o.serpent) {
+    // 오로라 리바이어던: 물결치는 긴 몸통 마디, 등에 빛나는 지느러미, 용 같은 머리
+    const segs = 12;
+    for (let i = 0; i < segs; i++) {
+      const x = L * 0.4 - i * L * 0.085;
+      const y = Math.sin(i * 0.8) * H * 0.7;
+      const sh = 1 - i * 0.05;
+      add(L * 0.1, H * sh, W * sh, o.color, x, y, 0);
+      add(L * 0.09, H * 0.3 * sh, W * 1.02 * sh, o.belly, x, y - H * 0.35 * sh, 0);
+      add(L * 0.05, H * 0.5 * sh, W * 0.1, i % 2 ? o.fin : o.pc, x, y + H * 0.7 * sh, 0, 0, 0, 0.3);
+      if (i % 3 === 0) for (const s of [-1, 1]) add(L * 0.04, H * 0.12, 0.012, o.pc, x, y, s * (W * sh / 2 + 0.006));
+    }
+    add(L * 0.14, H * 1.1, W * 1.05, o.color, L * 0.5, 0, 0);               // 머리
+    add(L * 0.12, H * 0.45, W * 0.8, o.color, L * 0.62, -H * 0.15, 0);       // 주둥이
+    for (const s of [-1, 1]) {
+      add(L * 0.12, H * 0.08, H * 0.08, o.pc, L * 0.42, H * 0.65, s * W * 0.3, 0, s * 0.4, 0.6); // 뿔
+      eyeSide(L * 0.54, H * 0.18, s * (W * 0.53 + 0.01), s, H * 0.25);
+      add(L * 0.25, H * 0.04, 0.02, o.fin, L * 0.66, -H * 0.3, s * W * 0.3, 0, s * 0.5, -0.2); // 수염
+    }
+    add(L * 0.16, H * 1.2, W * 0.2, o.fin, -L * 0.62, Math.sin(12 * 0.8) * H * 0.7, 0);        // 꼬리지느러미
+  } else if (o.puffer) {
     // 별사탕 복어: 동글동글 네모 몸에 알록달록 가시가 송송
     add(L * 0.72, H, W, o.color, 0, 0, 0);
     add(L * 0.62, H * 0.86, W * 1.06, o.color, 0, 0, 0);
@@ -495,6 +566,13 @@ export function makeFishModel(f, mutName, weight) {
       // 머리에도 빨간 띠 하나, 꼬리지느러미는 빨강·하양 줄
       add(L * 0.04, H * 0.9, W * 0.96, o.pc, L * 0.46, -H * 0.03, 0, 0, 0, 0.55);
       for (let k = 0; k < 3; k++) add(L * 0.115, H * 0.12, W * 0.17, 0xfbf6f0, -L * 0.52, (k - 1) * H * 0.36, 0);
+    }
+    if (o.crystals) {
+      // 수정 비늘: 등과 옆구리에 빛나는 수정이 솟아 있어요
+      for (let i = 0; i < 7; i++) {
+        const x = -L * 0.3 + i * L * 0.1, hh = H * (0.4 + (i % 3) * 0.15);
+        add(H * 0.14, hh, H * 0.14, o.crystals, x, H * 0.5 + hh / 2, ((i % 3) - 1) * W * 0.2, 0, i, 0.2);
+      }
     }
     if (o.rainbow) {
       // 무지개 붕어: 몸을 빨주노초파남보 세로 띠로

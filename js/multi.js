@@ -16,13 +16,14 @@ export const PLAYER_LOOKS = [
 
 export function setupMulti(ctx) {
   const { THREE, scene, makeBlockPerson, buildRod, placeSpin, RODS, ROD_LEN, makeBobber, cordMat, makeNameTag,
-    makeFishModel, findFish, fishScale, getMyState, onFeed, onStatus } = ctx;
+    makeFishModel, findFish, fishScale, getMyState, onFeed, onStatus, outfitToLook, makeBoatModel, getOutfit } = ctx;
 
   let ws = null;
   let myId = null, room = null, maxPlayers = 5, opened = false, wanted = false;
   let lastSend = 0, heartbeat = 0;
   const remotes = new Map(); // id → 다른 플레이어
   const tmp = new THREE.Vector3();
+  const FLOP_FISH = '물 만난 광어'; // 펄떡펄떡 뛰는 물고기
 
   const status = (text, ok = false) => onStatus && onStatus(text, ok, { room, count: remotes.size + 1, max: maxPlayers, connected: opened && !!room });
 
@@ -36,7 +37,7 @@ export function setupMulti(ctx) {
     try { ws = new WebSocket(url); } catch (_) { status('연결할 수 없어요.'); return; }
     ws.onopen = () => {
       opened = true;
-      ws.send(JSON.stringify({ t: 'join', name, room: roomCode, look, s: getMyState() }));
+      ws.send(JSON.stringify({ t: 'join', name, room: roomCode, look, o: getOutfit ? getOutfit() : null, s: getMyState() }));
       // 탭을 내려 둬도 연결이 안 끊기게 가끔 신호를 보내요
       clearInterval(heartbeat);
       heartbeat = setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 's', s: getMyState() })); }, 5000);
@@ -92,6 +93,9 @@ export function setupMulti(ctx) {
     } else if (m.t === 's') {
       const r = remotes.get(m.id);
       if (r && m.s) r.s = m.s;
+    } else if (m.t === 'outfit') {
+      const r = remotes.get(m.id);
+      if (r && m.o) dressRemote(r, m.o);
     } else if (m.t === 'catch') {
       const r = remotes.get(m.id);
       const f = findFish(m.f);
@@ -106,7 +110,8 @@ export function setupMulti(ctx) {
   // ---------- 다른 플레이어 만들기 ----------
   function addRemote(p) {
     if (!p || !p.id || remotes.has(p.id) || p.id === myId) return;
-    const look = PLAYER_LOOKS[Math.abs(p.look | 0) % PLAYER_LOOKS.length];
+    // 옷차림 정보가 있으면 그 옷으로, 없으면 기본 옷 중 하나로
+    const look = p.o && outfitToLook ? outfitToLook(p.o) : PLAYER_LOOKS[Math.abs(p.look | 0) % PLAYER_LOOKS.length];
     const body = makeBlockPerson(look);
     body.group.scale.setScalar(1.2);
     const s = p.s || { x: 0, y: -0.08, z: 8, r: 0, a: 'idle', rod: -1, n: 0 };
@@ -126,16 +131,32 @@ export function setupMulti(ctx) {
     const line = new THREE.Line(new THREE.BufferGeometry(), cordMat);
     line.visible = false;
     scene.add(line);
-    remotes.set(p.id, { id: p.id, name: p.name, ...body, rodG, rodIdx: -2, spin: [], tag, shownN: s.n || 0, bob, line, s, held: null, heldKey: '', arm: 1.2, walkT: 0, pop: null, prev: body.group.position.clone() });
+    remotes.set(p.id, { id: p.id, name: p.name, ...body, rodG, rodIdx: -2, spin: [], tag, boat: null, boatIdx: -1, shownN: s.n || 0, bob, line, s, held: null, heldKey: '', arm: 1.2, walkT: 0, pop: null, prev: body.group.position.clone() });
   }
   function removeRemote(id) {
     const r = remotes.get(id);
     if (!r) return;
     scene.remove(r.group, r.bob, r.line);
+    if (r.boat) scene.remove(r.boat);
     if (r.pop) scene.remove(r.pop.model);
     remotes.delete(id);
   }
   function clearRemotes() { for (const id of [...remotes.keys()]) removeRemote(id); }
+
+  // 옷을 바꾸면 몸을 새로 만들고 낚싯대·이름표·물고기를 옮겨요
+  function dressRemote(r, o) {
+    if (!outfitToLook) return;
+    const nb = makeBlockPerson(outfitToLook(o));
+    nb.group.scale.setScalar(1.2);
+    nb.group.position.copy(r.group.position);
+    nb.group.rotation.copy(r.group.rotation);
+    r.armR.remove(r.rodG); nb.armR.add(r.rodG);
+    r.group.remove(r.tag.sp); nb.group.add(r.tag.sp);
+    if (r.held) { r.group.remove(r.held); nb.group.add(r.held); }
+    scene.remove(r.group);
+    scene.add(nb.group);
+    Object.assign(r, nb);
+  }
 
   function popFish(r, f, mut, w) {
     const model = makeFishModel(f, mut, w);
@@ -143,7 +164,7 @@ export function setupMulti(ctx) {
     if (sc > 2.2) model.scale.multiplyScalar(2.2 / sc);
     scene.add(model);
     if (r.pop) scene.remove(r.pop.model);
-    r.pop = { model, start: performance.now(), from: (r.s.b ? tmp.fromArray(r.s.b) : r.group.position).clone() };
+    r.pop = { model, start: performance.now(), from: (r.s.b ? tmp.fromArray(r.s.b) : r.group.position).clone(), flop: f.name === FLOP_FISH };
   }
 
   // ---------- 매 프레임 ----------
@@ -168,6 +189,17 @@ export function setupMulti(ctx) {
       const moving = speed > 0.6 && s.a !== 'sit';
       if (moving) r.walkT += dt * 9;
       // 이름표 숫자
+      // 보트: 타고 있으면 몸 아래에 보트를 그려요
+      const bt = s.bt >= 0 && makeBoatModel ? s.bt : -1;
+      if (bt !== r.boatIdx) {
+        r.boatIdx = bt;
+        if (r.boat) { scene.remove(r.boat); r.boat = null; }
+        if (bt >= 0) { r.boat = makeBoatModel(bt); scene.add(r.boat); }
+      }
+      if (r.boat) {
+        r.boat.position.set(g.position.x - Math.sin(g.rotation.y) * 0.25, g.position.y + 0.6 - (bt === 1 ? 0.48 : 0.38), g.position.z - Math.cos(g.rotation.y) * 0.25);
+        r.boat.rotation.set(0, g.rotation.y, Math.sin(t * 1.1) * 0.03);
+      }
       if (s.n !== r.shownN) { r.shownN = s.n; r.tag.draw(r.name, s.n); }
       // 낚싯대 바꾸기 / 꺼내기
       if (s.rod !== r.rodIdx) {
@@ -185,8 +217,15 @@ export function setupMulti(ctx) {
           r.held = makeFishModel(f, s.m);
           r.held.scale.multiplyScalar(0.55);
           r.held.position.set(0, 0.95, -0.5);
+          r.held.userData.flop = f.name === FLOP_FISH;
           g.add(r.held);
         }
+      }
+      // 물 만난 광어는 다른 사람 손에서도 펄떡펄떡! (내 화면이랑 같은 움직임)
+      if (r.held && r.held.userData.flop) {
+        const kick = Math.max(0, Math.sin(t * 8.5));
+        r.held.rotation.set(Math.sin(t * 11) * 0.5, Math.sin(t * 5) * 0.4, Math.sin(t * 17) * 0.85);
+        r.held.position.set(Math.sin(t * 7) * 0.08, 0.95 + kick * 0.45, -0.5 + Math.cos(t * 9) * 0.06);
       }
       // 팔·다리
       const empty = !r.rodG.visible && !r.held;
@@ -233,6 +272,12 @@ export function setupMulti(ctx) {
           r.pop.model.position.y += Math.sin(Math.min(1, q) * Math.PI) * 1.2;
           r.pop.model.rotation.y = g.rotation.y + Math.PI / 2;
           r.pop.model.rotation.z = Math.sin(t * 20) * 0.3;
+          if (r.pop.flop) {
+            // 물 만난 광어는 올라오는 내내 펄떡펄떡
+            r.pop.model.rotation.z = Math.sin(t * 18) * 0.95;
+            r.pop.model.rotation.x = Math.sin(t * 11) * 0.55;
+            r.pop.model.position.y += Math.max(0, Math.sin(t * 9)) * 0.5;
+          }
         }
       }
     }
@@ -242,8 +287,12 @@ export function setupMulti(ctx) {
     if (opened && room && ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'catch', f: item.name, m: item.mut || null, w: item.weight }));
   }
 
+  function sendOutfit(o) {
+    if (opened && room && ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'outfit', o }));
+  }
+
   return {
-    connect, disconnect, update, sendCatch,
+    connect, disconnect, update, sendCatch, sendOutfit,
     get connected() { return opened && !!room; },
     get room() { return room; },
     players: () => [...remotes.values()].map((r) => ({ name: r.name, n: r.s.n }))

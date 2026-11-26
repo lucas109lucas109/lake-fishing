@@ -1,0 +1,20 @@
+# 보안 헤더 — Netlify 에 올리면 이 파일대로 모든 페이지에 붙어요.
+# serve.js 도 이 파일을 읽어서 내 컴퓨터에서도 똑같이 적용해요 (그래서 미리 확인할 수 있어요).
+#
+# X-Frame-Options / frame-ancestors : 다른 사이트가 내 게임을 몰래 틀(iframe) 안에 넣지 못하게 (클릭재킹 방지)
+# X-Content-Type-Options            : 브라우저가 파일 종류를 멋대로 추측하지 못하게
+# Referrer-Policy                   : 다른 사이트로 갈 때 내 주소를 너무 많이 알려 주지 않게
+# Permissions-Policy                : 카메라·마이크·위치는 아예 못 쓰게
+# Content-Security-Policy (CSP)     : 정해 둔 곳에서만 코드·그림·모델을 불러오게
+#   - script-src 의 sha256-... 는 index.html 안의 importmap 글자 그대로의 지문이에요.
+#     index.html 의 importmap 을 고치면 지문이 바뀌어서 게임이 안 켜져요 → 그땐 지문을 다시 계산해야 해요.
+#   - cdn.jsdelivr.net = three.js, cdn.cinevva.com = 나무 모델, youtube = 유튜브 노래(켰을 때만)
+#   - fonts.googleapis.com / fonts.gstatic.com = 대사 글씨체(고운돋움, 주아)
+#   - blob: 은 나무 모델 안의 텍스처를 꺼낼 때 브라우저가 잠깐 만드는 주소예요 (막으면 나무 색이 깨져요)
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-qC+YWhF3NPdIQ5KTB3TZrbgffn9kAvaLLFtTKaG1N4c=' https://cdn.jsdelivr.net https://www.youtube.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://cdn.cinevva.com; media-src 'self'; frame-src https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'

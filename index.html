@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>노을 호수 낚시</title>
+  <!-- 예쁜 글씨체 (대사용): 고운돋움, 주아 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- 3D 그래픽 도구(three.js)를 인터넷에서 불러와요 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- 왼쪽 위: 돈과 낚싯대 -->
+  <div id="topLeft">
+    <div id="money">$0</div>
+    <div class="rodName">낚싯대 · <b id="rodName">기본 낚싯대</b></div>
+    <div id="clock" class="rodName">노을 · 18:30</div>
+    <div id="buffLine" class="hudLine buff hidden"></div>
+    <div id="questLine" class="hudLine quest hidden"></div>
+    <button id="dexBtn" class="smallBtn">도감 (Q)</button>
+    <button id="setBtn" class="smallBtn">설정</button>
+    <button id="multiBtn" class="smallBtn">멀티</button>
+    <div id="multiHud" class="hudLine hidden"></div>
+  </div>
+  <div id="keys">WASD 이동 · 오른쪽 드래그 화면 회전 · Shift 시프트 락 · 휠 확대 · 클릭/스페이스 낚시 · E 상호작용 · 1~9 인벤토리</div>
+  <div id="lockDot" class="hidden"></div>
+  <div id="lockHint" class="hidden"></div>
+
+  <!-- 모닥불 굽기 창 -->
+  <div id="cookPanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>모닥불 · 물고기 굽기</span><button class="closeBtn" data-close="cookPanel">닫기</button></div>
+      <div id="cookList"></div>
+      <div class="count" style="margin-top:8px">창을 닫아도 계속 앉아서 불멍할 수 있어요. 방향키를 누르면 일어나요.</div>
+    </div>
+  </div>
+
+  <!-- 설정 창 -->
+  <div id="setPanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>설정</span><button class="closeBtn" data-close="setPanel">닫기</button></div>
+      <div class="setRow">
+        <div><div class="nm">시프트 락</div><div class="ds">켜 두면 Shift 키로 마우스를 화면에 고정해요. 캐릭터가 카메라 방향을 바라봐요.</div></div>
+        <button id="optShift" class="toggle"></button>
+      </div>
+      <div class="setRow">
+        <div><div class="nm">마우스 감도 <b id="sensVal">1.0</b></div><div class="ds">화면 돌리는 속도예요.</div></div>
+        <input id="optSens" type="range" min="0.2" max="3" step="0.1">
+      </div>
+      <div class="setRow">
+        <div><div class="nm">상하 반전</div><div class="ds">마우스를 위로 올리면 화면이 아래를 봐요.</div></div>
+        <button id="optInvert" class="toggle"></button>
+      </div>
+      <div class="setRow col">
+        <div><div class="nm">저장 / 불러오기</div><div class="ds">기록(돈·물고기·낚싯대·도감)을 다른 컴퓨터나 다른 사이트 주소로 옮길 때 써요.</div></div>
+        <div class="saveBtns">
+          <button id="saveCopy" class="actBtn">세이브 코드 복사</button>
+          <button id="saveFile" class="actBtn">파일로 저장</button>
+          <button id="loadFileBtn" class="actBtn">파일 불러오기</button>
+          <input id="loadFile" type="file" accept=".json,application/json" class="hidden">
+        </div>
+        <textarea id="saveCodeBox" rows="3" placeholder="여기에 세이브 코드를 붙여 넣고 [코드로 불러오기]를 눌러요"></textarea>
+        <div class="saveBtns">
+          <button id="saveLoadCode" class="actBtn">코드로 불러오기</button>
+          <span id="saveMsg" class="saveMsg"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 멀티플레이 창 -->
+  <div id="multiPanel" class="modal hidden">
+    <div class="modalBox">
+      <div class="modalHead"><span>멀티플레이 (방 하나에 최대 5명)</span><button class="closeBtn" data-close="multiPanel">닫기</button></div>
+      <div class="setRow col">
+        <div class="nm">내 이름</div>
+        <input id="multiName" class="textIn" maxlength="12" placeholder="12글자까지">
+        <div class="nm">옷 색</div>
+        <div id="multiLooks" class="looks"></div>
+        <div class="nm">방 코드</div>
+        <input id="multiRoom" class="textIn" maxlength="8" placeholder="PLAZA">
+        <div class="ds">친구와 같은 방 코드를 쓰면 같은 호수에서 만나요. (영어 대문자·숫자 3~8글자, 기본: PLAZA = 광장)</div>
+        <div class="saveBtns">
+          <button id="multiJoin" class="actBtn">접속</button>
+          <button id="multiLeave" class="actBtn hidden">나가기</button>
+          <span id="multiStatus" class="multiStatus">혼자 하기 모드예요.</span>
+        </div>
+        <div class="ds">돈·가방·도감 같은 기록은 각자 자기 컴퓨터에 저장돼요. 다른 사람에게는 내 모습·이름·잡은 수·잡은 물고기 소식만 보여요.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 왼쪽 아래 소식 -->
+  <div id="feed"></div>
+
+  <!-- 가끔 떠오르는 낭만 있는 말 -->
+  <div id="romance"></div>
+
+  <!-- 오른쪽 위: 음악 + 가방 (10번째 물건부터 여기 들어가요) -->
+  <div id="topRight">
+    <button id="mute" class="smallBtn">음악 끄기</button>
+    <div id="ytBox" class="hidden">
+      <div class="ytTitle">지금 나오는 노래</div>
+      <div id="ytPlayer"></div>
+    </div>
+  </div>
+
+  <!-- NPC 말풍선 -->
+  <div id="bubble" class="hidden"><b id="bubbleName"></b><span id="bubbleText"></span></div>
+
+  <!-- 상점 앞에서 뜨는 안내 -->
+  <div id="prompt" class="hidden"><span class="key">E</span><span id="promptText"></span></div>
+
+  <!-- 힘 모으기 막대 -->
+  <div id="power" class="hidden"><div id="powerFill"></div></div>
+
+  <!-- 당기기 미니게임 -->
+  <div id="reelBox" class="hidden">
+    <div id="reelTrack">
+      <div id="zone"></div>
+      <div id="fishIcon"></div>
+    </div>
+    <div id="progTrack"><div id="prog"></div></div>
+  </div>
+
+  <!-- 안내 글 -->
+  <div id="statusBox">
+    <div id="talkLine" class="hidden"><b id="talkName"></b><span id="talkText"></span></div>
+    <div id="status"></div>
+    <div id="hint"></div>
+  </div>
+
+  <!-- 인벤토리 (잡은 물고기) -->
+  <!-- 아래 줄: 인벤토리 9칸 + 바로 옆에 가방 -->
+  <div id="bottomBar">
+    <div id="hotbar"></div>
+    <div id="bag" class="closed">
+      <button id="bagHead" class="bagHead"><span class="bagTag">가방</span><b id="bagCount">0</b><span id="bagToggle" class="bagToggle">열기 (B)</span></button>
+      <div id="bagGrid"></div>
+    </div>
+  </div>
+
+  <!-- 잡았을 때 잠깐 뜨는 카드 -->
+  <div id="catchCard" class="hidden">
+    <div id="ccNew">새로운 물고기</div>
+    <div id="ccMut"></div>
+    <div id="ccName"></div>
+    <div id="ccInfo"></div>
+  </div>
+
+  <!-- 도감 창 (물고기 / 낚싯대) -->
+  <div id="dexPanel" class="modal hidden">
+    <div class="modalBox wide">
+      <div class="modalHead">
+        <div class="tabs">
+          <button class="tab active" data-tab="fish">물고기 도감</button>
+          <button class="tab" data-tab="rod">낚싯대 도감</button>
+        </div>
+        <button class="closeBtn" data-close="dexPanel">닫기</button>
+      </div>
+      <div id="dexList"></div>
+    </div>
+  </div>
+
+  <!-- 낚싯대 상점 창 -->
+  <div id="rodShopPanel" class="modal hidden">
+    <div class="modalBox wide">
+      <div class="modalHead"><span id="rodShopTitle">낚싯대 상점</span><button class="closeBtn" data-close="rodShopPanel">닫기</button></div>
+      <div id="rodShopList"></div>
+    </div>
+  </div>
+
+  <!-- 물고기 판매점 창 -->
+  <div id="sellPanel" class="modal hidden">
+    <div class="modalBox wide">
+      <div class="modalHead">
+        <div class="tabs">
+          <button class="tab sellTab active" data-sell="sell">물고기 팔기</button>
+          <button class="tab sellTab" data-sell="chart">희귀도 · 이로치 표</button>
+        </div>
+        <button class="closeBtn" data-close="sellPanel">닫기</button>
+      </div>
+      <div id="sellList"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

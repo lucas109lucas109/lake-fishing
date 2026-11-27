@@ -7,7 +7,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { YOUTUBE_LINK, SHOW_YOUTUBE, MUSIC_FILE, MUSIC_VOLUME } from './settings.js';
 import { setupMulti, PLAYER_LOOKS } from './multi.js';
 import { startStaticMerge, compactRig } from './optimize.js';
-import { buildSeaWorld, HOUSE_STYLES } from './seaworld.js';
+import { fixCoplanar } from './zfix.js';
+import { buildSeaWorld, HOUSE_STYLES, DecoBatch } from './seaworld.js';
+import { buildMuseum, cleanMuseum, MUSEUM_REWARD } from './museum.js';
+import { buildRuby, rubyHeight, templeGround, RUBY, RUBY_SEA, RUBY_STRAIT, RUBY_LAGOON, SEALS, DOCK as RUBY_DOCK } from './ruby.js';
+import { buildRubyRod } from './rubyrods.js';
+import { setupLife, cleanLife } from './life.js';
+import { getSeason } from './seasons.js';
 import { cloudEnabled, startCloud, signIn, signOutCloud, loadCloud, saveCloud, watchHouses, claimHouse, setHouseStyleCloud, releaseHouse } from './cloud.js';
 import { RARITY, FISH, MUTATIONS, rarityOdds, rollFish, updateFishFx, findFish, mutList, mutKey, priceOf, fmtKg, makeFishModel, fishScale, zoneOf as fishZone } from './fish.js';
 
@@ -121,7 +127,7 @@ const perfText = () => `지금 초당 ${fpsMeter.value}장 · 그래픽카드: $
 // 움직이지 않는 물체 합치기: 첫 화면이 그려지고 2초 뒤부터 4초 동안 지켜본 다음 합쳐요
 setTimeout(() => {
   scene.updateMatrixWorld(true);
-  startStaticMerge({ THREE, scene, protect: new Set(LANTERN_MATS), waitMs: 4000, onDone: (n) => console.log(`[최적화] 안 움직이는 물체 ${n}개를 합쳤어요`) });
+  startStaticMerge({ THREE, scene, protect: new Set(LANTERN_MATS), waitMs: 4000, onDone: (n) => { console.log(`[최적화] 안 움직이는 물체 ${n}개를 합쳤어요`); setTimeout(() => { try { for (let k = 0; k < 4; k++) if (!fixCoplanar(THREE, scene, { quiet: k > 0 })) break; } catch (e) { console.warn('[겹침 고치기]', e); } }, 50); } }); // 합친 뒤 겹쳐 깜빡이는 면 고치기 (zfix.js) — 띄운 면이 또 다른 면과 겹치면 한 번 더 (최대 4번)
 }, 2000);
 
 const mat = (color, roughness = 0.86, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness, ...extra });
@@ -168,7 +174,13 @@ const SEA = { x: -10, z: 100, rx: 115, rz: 74, y: 0.1, zone: 'sea', sea: true, n
 const JUNGLE = { x: 66, z: 104, r: 27 };
 const JUNGLE_POND = { x: JUNGLE.x + 9, z: JUNGLE.z + 2, rx: 11, rz: 8, y: 0.3, zone: 'jungle', jungle: true, name: '정글 연못', luck: 0.06, biteMul: 1.3, pad: 0.3 };
 WATERS.push(JUNGLE_POND);
+// 루비 섬 안의 루비 호수 (전부 얕아서 걸어 들어가요) — 루비 공방 낚싯대로만 낚여요
+const RUBY_POND = { ...RUBY_LAGOON, zone: 'ruby', ruby: true, lagoon: true, name: '루비 호수', luck: 0.08, biteMul: 1.45, pad: 0.3 };
+WATERS.push(RUBY_POND);
 WATERS.push(SEA);
+// 큰 바다 남쪽으로 넓힌 루비 바다 + 이어 주는 해협 (보트로 갈 수 있어요). 물가 거품은 겹치는 곳을 잘라 내요
+WATERS.push({ ...RUBY_STRAIT, y: 0.1, zone: 'sea', sea: true, strait: true, name: '루비 해협', luck: 0.03, biteMul: 1.15, pad: 0, noFoam: true, maxSeg: 24 });
+WATERS.push({ ...RUBY_SEA, y: 0.1, zone: 'ruby', ruby: true, sea: true, name: '루비 바다', luck: 0.04, biteMul: 1.4, pad: 7, maxSeg: 56 });
 // 바다 위 부두(모래사장에서 바다로 쭉 뻗은 나무 다리)
 const SEA_PIER = { x0: -11.1, x1: -8.9, z0: 21.5, z1: 38 };
 const RIVER = WATERS.filter((e) => e.aurora);
@@ -187,7 +199,7 @@ const inLake = (x, z, margin = 0) => !!waterAt(x, z, margin);
 const SHALLOW = 0.86;
 function isShallow(x, z) {
   const w = waterInfo(x, z);
-  return !!w && (w.e.stream || w.e.jungle || w.d > SHALLOW); // 정글 연못은 전부 얕아요 (걸어 들어가요)
+  return !!w && (w.e.stream || w.e.jungle || w.e.lagoon || w.d > SHALLOW); // 정글 연못 · 루비 호수는 전부 얕아요 (걸어 들어가요)
 }
 
 // 언덕 만들기: 큰 바위 덩어리 + 풀 덮개 + 울퉁불퉁 튀어나온 바위들
@@ -279,10 +291,15 @@ const waterParts = [];
 // 오로라 강의 물: 청록빛으로 은은하게 스스로 빛나요 (밤에 특히 예뻐요)
 const auroraWaterMat = new THREE.MeshStandardMaterial({ color: 0x2a9aa8, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.93, vertexColors: true, emissive: 0x0a4a6a, emissiveIntensity: 0.45 });
 const auroraSandMat = mat(0xb8aac8, 0.95); // 보랏빛 모래
+// 루비 바다: 붉은빛이 살짝 도는 물 + 붉은 모래
+const rubyWaterMat = new THREE.MeshStandardMaterial({ color: 0x8a4a68, roughness: 0.16, metalness: 0.12, transparent: true, opacity: 0.95, vertexColors: true, emissive: 0x3a0a18, emissiveIntensity: 0.3 });
+const rubySandMat = mat(0xd8a098, 0.95);
+// 루비 호수: 붉은 보석빛으로 은은하게 빛나는 물
+const rubyPondMat = new THREE.MeshStandardMaterial({ color: 0xff5a7a, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.9, vertexColors: true, emissive: 0xa80a2a, emissiveIntensity: 0.45 });
 WATERS.forEach((e, k) => {
   // 물가 모래 (개울은 모래 테두리를 얇게)
   const pad = e.pad ?? (e.stream ? 0.35 : e.river ? 1.3 : 0.9);
-  const shore = new THREE.Mesh(new THREE.CircleGeometry(1, e.sea ? 128 : 64), e.aurora ? auroraSandMat : e.sea ? mat(0xe8d4a4, 0.95) : mat(0x8c7c5a)); // 바다는 밝은 모래사장
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(1, e.sea ? 128 : 64), e.aurora ? auroraSandMat : e.ruby ? rubySandMat : e.sea ? mat(0xe8d4a4, 0.95) : mat(0x8c7c5a)); // 바다는 밝은 모래사장
   shore.rotation.x = -Math.PI / 2;
   shore.scale.set(e.rx + pad, e.rz + pad, 1);
   shore.position.set(e.x, e.y > 1 ? PLATEAU_TOP + 0.02 + k * 0.001 : -0.06 + k * 0.001, e.z);
@@ -305,7 +322,7 @@ WATERS.forEach((e, k) => {
     cols[i * 3] = v * 0.92; cols[i * 3 + 1] = v; cols[i * 3 + 2] = v * (1.02 - d * 0.04);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  const water = new THREE.Mesh(geo, e.aurora ? auroraWaterMat : waterMat);
+  const water = new THREE.Mesh(geo, e.aurora ? auroraWaterMat : e.lagoon ? rubyPondMat : e.ruby ? rubyWaterMat : waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.set(e.x, e.y + k * 0.002, e.z);
   water.receiveShadow = true;
@@ -319,9 +336,25 @@ WATERS.forEach((e, k) => {
     scene.add(sh);
   });
   // 물가의 하얀 거품 테두리 (개울은 빼요)
-  if (!e.stream && !e.river) {
+  if (!e.stream && !e.river && !e.noFoam) {
     const fm = new THREE.MeshBasicMaterial({ color: 0xf4fbf6, transparent: true, opacity: 0.35, depthWrite: false });
-    const foam = new THREE.Mesh(new THREE.RingGeometry(0.975, 1.004, 128), fm);
+    // 다른 바다와 겹치는 곳(해협 · 루비 바다)은 물 한가운데라 거품 띠를 잘라 내요
+    let ring = new THREE.RingGeometry(0.975, 1.004, 128);
+    if (e.sea) {
+      ring = ring.toNonIndexed();
+      const rp = ring.attributes.position, keep = [];
+      const others = WATERS.filter((o) => o !== e && o.sea);
+      for (let i = 0; i < rp.count; i += 3) {
+        const cx = (rp.getX(i) + rp.getX(i + 1) + rp.getX(i + 2)) / 3, cy = (rp.getY(i) + rp.getY(i + 1) + rp.getY(i + 2)) / 3;
+        const wx = e.x + cx * e.rx, wz = e.z - cy * e.rz; // 판을 눕히면 y → -z 가 돼요
+        if (others.some((o) => ((wx - o.x) / o.rx) ** 2 + ((wz - o.z) / o.rz) ** 2 < 0.995)) continue;
+        for (let j = 0; j < 3; j++) keep.push(rp.getX(i + j), rp.getY(i + j), 0);
+      }
+      ring.dispose();
+      ring = new THREE.BufferGeometry();
+      ring.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
+    }
+    const foam = new THREE.Mesh(ring, fm);
     foam.rotation.x = -Math.PI / 2;
     foam.scale.set(e.rx, e.rz, 1);
     foam.position.set(e.x, e.y + 0.05, e.z);
@@ -425,7 +458,8 @@ for (const x of [-2.12, 2.12]) {
   dock.add(rail);
 }
 const onDock = (x, z) => (x > DOCK.x0 && x < DOCK.x1 && z > DOCK.z0 && z < DOCK.z1) ||
-  (x > SEA_PIER.x0 && x < SEA_PIER.x1 && z > SEA_PIER.z0 && z < SEA_PIER.z1); // 바다 부두도 부두예요
+  (x > SEA_PIER.x0 && x < SEA_PIER.x1 && z > SEA_PIER.z0 && z < SEA_PIER.z1) || // 바다 부두도 부두예요
+  (Math.abs(x - RUBY_DOCK.x) < 1.6 && z > RUBY_DOCK.z - 9 && z < RUBY_DOCK.z + 1.2); // 루비 섬 선착장
 
 // 등불 (보랏빛 불꽃) — 밤이 되면 더 밝아져요
 const LANTERN_MATS = [];
@@ -1259,12 +1293,24 @@ const RODS = [
   { name: '심해왕의 삼지창', shop: 'aurora', price: 70000, luck: 0.5, reel: 1.6, bite: 0.25, zone: 0.12, perk: '특기: 입질이 엄청 빨라요 (+300%)', style: 'trident',
     color: 0x0a1a3a, color2: 0x1a4a7a, grip: 0x3a2410, accent: 0xffd04a, reelC: 0xc8a030, rings: 7, metal: 0.7, rough: 0.2, glow: 0x3ad8ff, tip: 'trident', orbit: 0 },
   // ---- 정글섬 공방에서만 팔아요 (shop: 'jungle') — 정글 연못은 이 낚싯대로만 낚여요 ----
-  { name: '덩굴 낚싯대', shop: 'jungle', price: 1200000, luck: 0.7, reel: 1.8, bite: 0.32, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (정글 왕보다!)',
+  { name: '덩굴 낚싯대', shop: 'jungle', price: 2500000, luck: 0.7, reel: 1.8, bite: 0.32, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (정글 왕보다!)',
     color: 0x3a5a22, color2: 0x6a8a3a, grip: 0x4a2a14, accent: 0xb8ff6a, reelC: 0x3a4a2a, rings: 0, metal: 0.1, rough: 0.7, glow: 0x6aff3a, tip: 'none', orbit: 4, style: 'vine' },
-  { name: '황금 신전 낚싯대', shop: 'jungle', price: 3500000, luck: 0.98, reel: 1.9, bite: 0.3, zone: 0.16, perk: '특기: 운이 제일 좋아요 (정글 왕보다!)',
+  { name: '황금 신전 낚싯대', shop: 'jungle', price: 30000000, luck: 0.98, reel: 1.9, bite: 0.3, zone: 0.16, perk: '특기: 운이 제일 좋아요 (정글 왕보다!)',
     color: 0xc89a2a, color2: 0xffd84a, grip: 0x5a3a14, accent: 0x3affb0, reelC: 0xd8b040, rings: 0, metal: 0.85, rough: 0.2, glow: 0xffc83a, tip: 'none', orbit: 6, style: 'temple' },
-  { name: '정글 왕의 낚싯대', shop: 'jungle', price: 8000000, luck: 0.86, reel: 2.4, bite: 0.2, zone: 0.2, perk: '특기: 게이지·입질이 제일 빨라요',
-    color: 0x3a2a14, color2: 0xc8862a, grip: 0x1a0a04, accent: 0xffe23a, reelC: 0x0a2a1a, rings: 0, metal: 0.3, rough: 0.4, glow: 0xffa83a, tip: 'none', orbit: 10, style: 'king' }
+  { name: '정글 왕의 낚싯대', shop: 'jungle', price: 60000000, luck: 0.86, reel: 2.4, bite: 0.2, zone: 0.2, perk: '특기: 게이지·입질이 제일 빨라요',
+    color: 0x3a2a14, color2: 0xc8862a, grip: 0x1a0a04, accent: 0xffe23a, reelC: 0x0a2a1a, rings: 0, metal: 0.3, rough: 0.4, glow: 0xffa83a, tip: 'none', orbit: 10, style: 'king' },
+  // ---- 루비 섬 루비 공방에서만 팔아요 (shop: 'ruby') — 루비 바다 · 루비 호수는 이 낚싯대로만 낚여요 ----
+  //  가장 비싼 2개(seal)는 루비 신전의 봉인을 풀어야 살 수 있어요 (ruby.js SEALS) · 모양은 rubyrods.js
+  { name: '루비 낚싯대', shop: 'ruby', price: 200000000, luck: 1.05, reel: 2.2, bite: 0.24, zone: 0.22, perk: '특기: 루비 섬의 첫 낚싯대 · 홍옥이 나선으로 박혀 있어요',
+    color: 0x8a0a1a, color2: 0xd8203a, grip: 0x2a0a0e, accent: 0xd8b040, reelC: 0x3a0a12, rings: 0, metal: 0.5, rough: 0.25, glow: 0xff2a4a, tip: 'none', orbit: 4, style: 'ruby1' },
+  { name: '석류석 낚싯대', shop: 'ruby', price: 300000000, luck: 1.12, reel: 2.3, bite: 0.22, zone: 0.27, perk: '특기: 초록 칸이 아주 넓어요 · 석류석 수정이 자라나요',
+    color: 0x3a0a14, color2: 0x8a1a2a, grip: 0x1a0608, accent: 0xff6a7a, reelC: 0x2a0a10, rings: 0, metal: 0.3, rough: 0.35, glow: 0xff4a6a, tip: 'none', orbit: 5, style: 'ruby2' },
+  { name: '진홍 용비늘 낚싯대', shop: 'ruby', price: 450000000, luck: 1.2, reel: 2.55, bite: 0.19, zone: 0.22, perk: '특기: 게이지가 엄청 빨라요 · 루비 용왕의 비늘을 겹겹이',
+    color: 0x5a0a14, color2: 0xb8182a, grip: 0x1a0a08, accent: 0xffc83a, reelC: 0x2a0a0e, rings: 0, metal: 0.45, rough: 0.3, glow: 0xff3a2a, tip: 'none', orbit: 0, style: 'ruby3' },
+  { name: '루비 신전의 홍염 낚싯대', shop: 'ruby', seal: 's1', price: 700000000, luck: 1.35, reel: 2.65, bite: 0.17, zone: 0.26, perk: '특기: 봉인된 신전의 불꽃 · 운과 입질이 모두 뛰어나요',
+    color: 0xf0e0d8, color2: 0xff6a3a, grip: 0x5a1a14, accent: 0xd8b040, reelC: 0xe8d8d0, rings: 0, metal: 0.55, rough: 0.2, glow: 0xff5a1a, tip: 'none', orbit: 6, style: 'ruby4' },
+  { name: '루비 왕관 낚싯대', shop: 'ruby', seal: 's2', price: 1000000000, luck: 1.55, reel: 2.9, bite: 0.14, zone: 0.28, perk: '특기: 세상에서 제일 좋은 낚싯대 · 모든 능력이 최고예요',
+    color: 0xd8b040, color2: 0xff2a4a, grip: 0x3a0a14, accent: 0xffe8a0, reelC: 0xd8b040, rings: 0, metal: 0.85, rough: 0.18, glow: 0xff2a4a, tip: 'none', orbit: 10, style: 'ruby5' }
 ];
 RODS.forEach((r) => (r.shop = r.shop || 'base')); // 표시 없는 건 아래 상점 낚싯대
 
@@ -1622,6 +1668,8 @@ function buildRod(r, target) {
     for (const s of spin) skipSet.add(s.mesh);
     compactRig(THREE, target, skipSet);
   }
+  // ---------- 루비 공방 낚싯대 (rubyrods.js): 정글 낚싯대보다 더 촘촘하게 ----------
+  if (/^ruby[1-5]$/.test(r.style || '')) buildRubyRod({ THREE, r, target, put, spin, mat, compactRig, ROD_LEN });
   // 끝 주변을 빙글빙글 도는 작은 조각들
   for (let k = 0; k < (r.orbit || 0); k++) {
     const s = put(new THREE.Mesh(new THREE.OctahedronGeometry(r.tip === 'star' ? 0.025 : 0.035, 0), glowMat(k % 2 ? r.accent : r.glow, 1.5)), 0, half, 0);
@@ -2121,6 +2169,65 @@ const WALKER_LINES = [
 const WALKER_START = [[-3, 11], [3.5, 12], [-10, 11], [12.5, 9], [-30, 4], [-38, -12]];
 // 바다 세계: 모래사장 · 부두 · 등대 · 섬 · 큰 집 · 맵 곳곳 장식 (seaworld.js) — 가게·나무가 다 놓인 다음에 만들어서 겹치지 않게
 const seaWorld = buildSeaWorld({ THREE, scene, SEA, SEA_PIER, JUNGLE, JUNGLE_POND, islands, addCollider, colliders, inLake, onPlateau, onDock, shops, makeLantern, LANTERN_MATS, BOUNDS: { x0: -74, x1: 44, z0: -48, z1: 24 } });
+// 노을 박물관 (마을 동쪽) — 안쪽 전시관은 맵 북쪽 아주 먼 곳 (museum.js)
+const museum = buildMuseum({ THREE, scene, shops, LANTERN_MATS, FISH, RARITY, findFish, makeFishModel, fishScale, fmtKg, compactRig, colliders, inLake, get save() { return save; } });
+// 루비 섬 (큰 바다 남쪽 루비 바다) — 땅 · 신전 · 공방 · 판매점 · 봉인 (ruby.js)
+const ruby = buildRuby({ THREE, scene, shops, addCollider, colliders, LANTERN_MATS });
+islands.push({ x: RUBY.x, z: RUBY.z, r: RUBY.r }); // 섬 위는 헤엄이 아니라 걸어요 (높이는 groundY 가 rubyHeight 로)
+seaWorld.islands.push({ id: 'ruby', name: '루비 섬', x: RUBY.x, z: RUBY.z, r: RUBY.r }); // 화면 위 섬 안내에도 나와요
+{
+  // 루비 공방 앞 전시대 5개: 루비 낚싯대가 세워져서 천천히 돌아요 (봉인된 2개도 구경은 할 수 있어요)
+  const rods = RODS.filter((r) => r.shop === 'ruby');
+  ruby.stands.forEach((st, i) => {
+    const r = rods[i];
+    if (!r) return;
+    const holder = new THREE.Group();
+    holder.position.set(st.x, st.y + ROD_LEN / 2 * 1.05, st.z);
+    const rg = new THREE.Group(); rg.scale.setScalar(1.05); holder.add(rg);
+    const sp = buildRod(r, rg);
+    scene.add(holder);
+    displayRods.push({ holder, sp, ph: i * 1.3, base: st.y });
+    const tag = makeSign(r.name.replace(' 낚싯대', ''));
+    tag.scale.setScalar(0.4);
+    tag.position.set(st.x, st.y - 0.25, st.z - 0.52); tag.rotation.y = Math.PI;
+    scene.add(tag);
+  });
+  // 선착장 옆 보트 관리인 (내 보트를 불러서 루비 섬과 큰 바다를 오가요)
+  makeBoatCaller({ x: ruby.dockAt.x + 2.6, z: ruby.dockAt.z + 8.5, wx: ruby.dockAt.x + 2.6, wz: ruby.dockAt.z - 6 });
+}
+// 루비 섬 정기선: 모래사장 부두 끝 ↔ 루비 섬 선착장 (E 로 타면 화면이 까매졌다가 건너가요)
+const FERRY_HOME = { x: (SEA_PIER.x0 + SEA_PIER.x1) / 2, z: SEA_PIER.z1 - 1.0 };
+{
+  const fb = new DecoBatch(THREE), glowF = new DecoBatch(THREE);
+  // 정기선 배 모양 (선체 2톤 + 흰 띠 + 갑판 판자 + 선실 + 창 + 굴뚝 + 깃발 + 구명튜브) — 부두 옆과 루비 섬 선착장 옆에 한 척씩
+  const ferryBoat = (x, z, ry) => {
+    const c = Math.cos(ry), sn = Math.sin(ry), A = (b, geo, col, lx, ly, lz, sc) => b.add(geo, col, [x + lx * c + lz * sn, ly, z - lx * sn + lz * c], [0, ry, 0], sc);
+    const BOXG = new THREE.BoxGeometry(1, 1, 1);
+    A(fb, BOXG, 0x8a1a2a, 0, 0.05, 0, [2.4, 0.5, 6.4]); A(fb, BOXG, 0x6a1020, 0, -0.12, 0, [2.2, 0.3, 6.0]);
+    A(fb, BOXG, 0xf4efe2, 0, 0.33, 0, [2.44, 0.08, 6.44]);
+    for (let k = 0; k < 10; k++) A(fb, BOXG, k % 2 ? 0xb08a61 : 0x9a7a52, 0, 0.39, -2.9 + k * 0.6, [2.2, 0.04, 0.56]);
+    A(fb, BOXG, 0x8a1a2a, 0, 0.35, -3.6, [1.6, 0.5, 0.9]);                                         // 뱃머리
+    A(fb, BOXG, 0xf4efe2, 0, 1.05, 0.6, [1.8, 1.3, 2.4]);                                          // 선실
+    for (const s2 of [-1, 1]) for (let k = 0; k < 3; k++) A(glowF, BOXG, 0xffffff, s2 * 0.91, 1.15, -0.2 + k * 0.7, [0.02, 0.4, 0.45]); // 창
+    A(fb, BOXG, 0x8a1a2a, 0, 1.78, 0.6, [2.0, 0.14, 2.6]);                                         // 선실 지붕
+    A(fb, new THREE.CylinderGeometry(0.22, 0.26, 1, 10), 0xd8b040, 0, 2.3, 1.3, [1, 0.9, 1]);       // 굴뚝
+    A(fb, BOXG, 0x2a2a2a, 0, 2.78, 1.3, [0.5, 0.06, 0.5]);
+    A(fb, BOXG, 0x5a4232, 0, 2.6, -0.3, [0.06, 1.6, 0.06]); A(fb, BOXG, 0xd8203a, 0.3, 3.2, -0.3, [0.5, 0.3, 0.02]); // 깃발
+    for (const s2 of [-1, 1]) A(fb, new THREE.TorusGeometry(0.2, 0.06, 6, 12), 0xff6a3a, s2 * 1.23, 0.62, -1.4, [1, 1, 1]); // 구명튜브
+    for (let k = 0; k < 6; k++) for (const s2 of [-1, 1]) A(fb, BOXG, 0xd8d0c0, s2 * 1.15, 0.6, -2.6 + k * 1.0, [0.05, 0.4, 0.05]); // 난간 기둥
+    for (const s2 of [-1, 1]) A(fb, BOXG, 0xd8d0c0, s2 * 1.15, 0.8, -0.1, [0.04, 0.04, 5.2]);
+  };
+  ferryBoat(SEA_PIER.x0 - 1.9, SEA_PIER.z1 - 3.5, 0);
+  ferryBoat(ruby.dockAt.x - 3.6, ruby.dockAt.z + 1.0, 0);
+  // 부두 끝 정기선 안내판
+  const sx = FERRY_HOME.x - 0.9, sz = FERRY_HOME.z + 0.6;
+  fb.add(new THREE.BoxGeometry(1, 1, 1), 0x5a4232, [sx, 1.05, sz], [0, 0, 0], [0.1, 1.6, 0.1]);
+  fb.add(new THREE.BoxGeometry(1, 1, 1), 0x8a1a2a, [sx, 1.75, sz], [0, 0, 0], [1.3, 0.55, 0.06]);
+  fb.build(scene); glowF.build(scene, { cast: false, material: new THREE.MeshStandardMaterial({ color: 0xffe6b0, emissive: 0xffb050, emissiveIntensity: 1.0 }) });
+  const sign = makeSign('루비 섬 정기선'); sign.scale.setScalar(0.5); sign.position.set(sx, 1.75, sz - 0.04); sign.rotation.y = Math.PI; scene.add(sign);
+  shops.push({ kind: 'ferry', to: 'ruby', title: '루비 섬 정기선 · 타기 (E)', group: new THREE.Group(), pos: new THREE.Vector3(FERRY_HOME.x, 0.26, FERRY_HOME.z), promptAt: new THREE.Vector3(FERRY_HOME.x, 2.6, FERRY_HOME.z), r: 1.6 });
+  shops.push({ kind: 'ferry', to: 'home', title: '정기선 · 모래사장 부두로 돌아가기 (E)', group: new THREE.Group(), pos: new THREE.Vector3(ruby.dockAt.x, 0.26, ruby.dockAt.z), promptAt: new THREE.Vector3(ruby.dockAt.x, 2.6, ruby.dockAt.z), r: 1.8 });
+}
 // 정글 판매점: 정글섬에서 잡은 비싼 물고기를 바로 팔 수 있어요
 {
   const { part } = makeShop('sell', '정글 판매점', JUNGLE.x + 9, JUNGLE.z - 13, JUNGLE.x, JUNGLE.z - 27, 0x7a6a42, 0x2a6a3a, 0.17);
@@ -2128,45 +2235,13 @@ const seaWorld = buildSeaWorld({ THREE, scene, SEA, SEA_PIER, JUNGLE, JUNGLE_PON
   part(0.7, 0.35, 0.5, mat(0xc8a060), -1.1, 1.38, 0.95);  // 계산대 위 물고기 상자
   part(0.4, 0.12, 0.2, mat(0x5ab8e8, 0.4), -1.1, 1.6, 0.95);
 }
-// 정글 공방: 정글섬 선착장 옆. 정글 연못 전용 낚싯대(최소 $1,000,000)를 팔아요
+// 정글 공방: 정글섬 선착장 옆. 정글 연못 전용 낚싯대($2,500,000 ~ $60,000,000)를 팔아요
 {
   const { g, part } = makeShop('rod4', '정글 공방', JUNGLE.x - 11, JUNGLE.z - 12, JUNGLE.x, JUNGLE.z - 27, 0x6a5a3a, 0x3a6a2a, 0.17);
   // 가게 벽에 덩굴과 큰 잎사귀
   for (let i = 0; i < 6; i++) part(0.08, 0.9 + (i % 3) * 0.3, 0.08, mat(0x3a8a2a), -1.6 + i * 0.64, 1.9 - (i % 3) * 0.15, 1.36);
   part(1.1, 0.06, 0.5, mat(0x4aa83a), -1.2, 2.55, 1.45);
   part(1.1, 0.06, 0.5, mat(0x3a9a2a), 1.2, 2.55, 1.45);
-  // 가게 앞 이끼 낀 돌 받침대 3개 위에서 정글 낚싯대가 빙글빙글 (실물 구경)
-  const ry = g.rotation.y, fx = Math.sin(ry), fz = Math.cos(ry), rx = Math.cos(ry), rz = -Math.sin(ry);
-  const pedM = mat(0x7a8a6a, 0.85), mossM = mat(0x4a8a3a, 0.9), ringM = mat(0x8aff6a, 0.3, { emissive: 0x4aff3a, emissiveIntensity: 1.2 });
-  const sx = JUNGLE.x - 11, sz = JUNGLE.z - 12, base = 0.25 + 0.72;
-  RODS.filter((r) => r.shop === 'jungle').forEach((r, i) => {
-    const off = (i - 1) * 2.2;
-    const px = sx + fx * 3.6 + rx * off, pz = sz + fz * 3.6 + rz * off;
-    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.8, 8), pedM);
-    ped.position.set(px, 0.25 + 0.32, pz);
-    ped.castShadow = ped.receiveShadow = true;
-    const moss = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.06, 8), mossM);
-    moss.position.set(px, 0.25 + 0.74, pz);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.03, 6, 24), ringM);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(px, 0.25 + 0.78, pz);
-    scene.add(ped, moss, ring);
-    const holder = new THREE.Group();
-    holder.position.set(px, base + ROD_LEN / 2 * 1.05, pz);
-    const rg = new THREE.Group();
-    rg.scale.setScalar(1.05);
-    holder.add(rg);
-    const sp = buildRod(r, rg);
-    holder.userData.dynamic = true;
-    scene.add(holder);
-    displayRods.push({ holder, sp, ph: i * 2, base });
-    const tag = makeSign(r.name.replace(' 낚싯대', ''));
-    tag.scale.setScalar(0.42);
-    tag.position.set(px + fx * 0.52, 0.25 + 0.55, pz + fz * 0.52);
-    tag.rotation.y = ry;
-    scene.add(tag);
-    addCollider(px, pz, 0.55);
-  });
 }
 // 섬·모래사장 물건: 앞에 서서 E
 for (const t of seaWorld.things) {
@@ -2175,7 +2250,7 @@ for (const t of seaWorld.things) {
   shops.push({ kind: 'thing', thing: t, title: t.title, group: new THREE.Group(), pos: new THREE.Vector3(px, y, pz), promptAt: new THREE.Vector3(t.x, y + 2.6, t.z) });
 }
 // 섬마다 선착장 옆에 보트 관리인 (섬에서도 배를 불러 다른 섬이나 본토로 갈 수 있어요)
-seaWorld.islands.forEach((it) => makeBoatCaller({ x: it.x + 2.4, z: it.z - it.r * 0.84, y: 0.25, wx: it.x, wz: it.z - it.r * 0.95 - 7.5 }));
+seaWorld.islands.filter((it) => it.id !== 'ruby').forEach((it) => makeBoatCaller({ x: it.x + 2.4, z: it.z - it.r * 0.84, y: 0.25, wx: it.x, wz: it.z - it.r * 0.95 - 7.5 })); // 루비 섬은 선착장 옆에 따로 있어요
 const walkers = [];
 
 // =====================================================
@@ -2652,7 +2727,7 @@ function updateWalkers(now, dt, t) {
 const SAVE_KEY = 'lakeFishing_v2';
 // 살 수 있는 집 (seaworld.js 의 집 id 와 같아요). slots = 어항 칸 수
 const HOUSE_INFO = { sunset: { slots: 8 }, coral: { slots: 12 }, pine: { slots: 14 }, star: { slots: 18 }, whale: { slots: 26 } };
-const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {} };
+const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {}, furn: {}, decor: {}, mats: {}, garden: {}, pets: { own: [], on: null, love: {}, nm: {}, t: 0 }, friends: {}, rewards: { dex: [] }, titles: [], title: '', fireworks: 0, museum: { fish: {}, paid: false }, ruby: { s1: 0, s2: 0 } };
 
 // 저장된 기록은 누구나 개발자 도구로 고칠 수 있어서 그대로 믿으면 안 돼요.
 // 불러올 때 하나하나 검사해서, 이상한 값은 버리거나 안전한 값으로 바꿔요.
@@ -2685,7 +2760,9 @@ function cleanSave(s) {
       let id = intIn(it.id, 1, 1e12, 0);
       if (!id || ids.has(id)) id = 0; // 나중에 새 번호를 줘요
       if (id) ids.add(id);
-      list.push({ id, name: f.name, weight, mut, price: priceOf(f, weight, mut) }); // 값은 지금 기준으로 다시 계산
+      const item = { id, name: f.name, weight, mut, price: priceOf(f, weight, mut) }; // 값은 지금 기준으로 다시 계산
+      if (it.big === true) item.big = true; // 어항에 원래 크기로 넣은 물고기
+      list.push(item);
     }
     return list;
   };
@@ -2697,8 +2774,12 @@ function cleanSave(s) {
   // 집 디자인: 산 집만, 실제 있는 디자인 번호만
   out.houseStyles = {};
   for (const h of out.homes) { const v = s.houseStyles && s.houseStyles[h]; if (Number.isInteger(v) && v >= 0 && v < HOUSE_STYLES.length) out.houseStyles[h] = v; }
+  // 박물관에 기증한 물고기 (종류마다 한 마리) — museum.js
+  cleanMuseum(s, out, FISH, cleanItems);
+  // 루비 신전 봉인: 바친 물고기 수 (0~2) — ruby.js
+  out.ruby = { s1: intIn(s.ruby && s.ruby.s1, 0, 2, 0), s2: intIn(s.ruby && s.ruby.s2, 0, 2, 0) };
   let next = Math.max(intIn(s.nextId, 1, 1e12, 1), ...[...ids].map((i) => i + 1), 1);
-  for (const it of [...out.inv, ...Object.values(out.tanks).flat()]) if (!it.id) it.id = next++;
+  for (const it of [...out.inv, ...Object.values(out.tanks).flat(), ...Object.values(out.museum.fish)]) if (!it.id) it.id = next++;
   out.nextId = next;
   // 도감: 실제 있는 물고기만
   if (s.dex && typeof s.dex === 'object') {
@@ -2723,6 +2804,7 @@ function cleanSave(s) {
   // 보물 상자 연 시각 (알려진 상자만)
   out.chests = {};
   for (const id of ['chest_beach', 'chest_jungle']) if (s.chests && Number.isFinite(Number(s.chests[id]))) out.chests[id] = intIn(s.chests[id], 0, 1e15, 0);
+  cleanLife(s, out); // 가구 · 재료 · 정원 · 반려동물 · 친밀도 · 보상 (life.js)
   return out;
 }
 try {
@@ -2905,10 +2987,10 @@ const BIG_LINES = [
 ];
 let romanceTimer = 0;
 // =====================================================
-//  글리치의 날 — 가끔(20~40분에 한 번, 4분 동안) 세상이 지직거려요
+//  글리치의 날 — 가끔(8~15분에 한 번, 4분 동안) 세상이 지직거려요
 //  이때 낚은 물고기는 무조건 글리치 이로치가 붙어요 (다른 이로치랑 같이 겹칠 수 있어요)
 // =====================================================
-const glitchDay = { active: false, until: 0, next: performance.now() + (20 + Math.random() * 20) * 60000 };
+const glitchDay = { active: false, until: 0, next: performance.now() + (8 + Math.random() * 7) * 60000 };
 function glitchify(fish) {
   if (!glitchDay.active || !fish) return fish;
   const names = mutList(fish.mut).map((m) => m.name);
@@ -2929,7 +3011,7 @@ function setGlitchDay(on) {
     sayRomance(['세상이 뭔가 이상해요!']);
     tone(220, 0.08, 'square', 0.05); tone(880, 0.05, 'square', 0.04, 0.09); tone(140, 0.12, 'sawtooth', 0.04, 0.16);
   } else {
-    glitchDay.next = now + (20 + Math.random() * 20) * 60000;
+    glitchDay.next = now + (8 + Math.random() * 7) * 60000;
     sayRomance(['세상이 다시 멀쩡해졌어요.']);
   }
 }
@@ -2985,11 +3067,12 @@ function showCatchCard(it, isNew) {
 // 능력치 막대의 최대치는 제일 좋은 낚싯대 기준이에요
 // 능력치 막대의 끝(100%)은 앞으로 나올 더 좋은 낚싯대까지 생각해서 넉넉하게 잡아 뒀어요.
 // 그래서 지금 제일 좋은 낚싯대도 막대가 꽉 차지 않아요. (능력치 자체는 그대로예요)
+// (앞으로 더 좋은 낚싯대가 나와도 막대가 넘치지 않게 아주 넉넉하게 잡았어요)
 const STAT_MAX = {
-  luck: 1.2,   // 운 +120% 까지
-  reel: 1.6,   // 게이지 속도 x2.6 까지
-  bite: 4.0,   // 입질 속도 +400% 까지
-  zone: 0.3    // 초록 칸 +30% 까지
+  luck: 2.0,   // 운 +200% 까지
+  reel: 3.0,   // 게이지 속도 x4 까지
+  bite: 9.0,   // 입질 속도 +900% 까지
+  zone: 0.5    // 초록 칸 +50% 까지
 };
 // 초록 칸 기본 크기 (막대의 25%) + 낚싯대 보너스
 const BASE_ZONE = 0.25;
@@ -3033,7 +3116,10 @@ function renderDex() {
       const owned = save.owned.includes(i);
       const row = document.createElement('div');
       row.className = 'rodRow' + (owned ? '' : ' locked');
-      row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${owned ? r.name : r.name + ' (미보유)'}</div>${r.perk ? `<div class="perk">${r.perk}</div>` : ''}${statsHTML(r)}</div>`;
+      // 가격 + 파는 곳
+      const where = { base: '마을 낚싯대 상점', mountain: '언덕 위 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글섬 정글 공방', ruby: '루비 섬 루비 공방' + (r.seal ? ' (봉인)' : '') }[r.shop];
+      const priceLine = r.price ? `<div class="rodPrice">${money(r.price)} · ${where}</div>` : '<div class="rodPrice">처음부터 가진 낚싯대 (공짜)</div>';
+      row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${owned ? r.name : r.name + ' (미보유)'}</div>${priceLine}${r.perk ? `<div class="perk">${r.perk}</div>` : ''}${statsHTML(r)}</div>`;
       const btn = document.createElement('button');
       btn.className = 'actBtn';
       if (!owned) { btn.textContent = '상점에서 구매'; btn.disabled = true; }
@@ -3050,8 +3136,8 @@ function renderDex() {
 let rodShopKind = 'base';
 function renderRodShop() {
   const list = $('rodShopList');
-  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글 공방' }[rodShopKind];
-  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요', jungle: ' · 정글 연못의 힘센 물고기는 이 낚싯대로만 낚을 수 있어요' }[rodShopKind] || ''}</div>`;
+  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글 공방', ruby: '루비 공방' }[rodShopKind];
+  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요', jungle: ' · 정글 연못의 힘센 물고기는 이 낚싯대로만 낚을 수 있어요', ruby: ' · 루비 바다와 루비 호수의 물고기는 이 낚싯대로만 낚을 수 있어요. 가장 비싼 두 개는 루비 신전의 봉인을 풀어야 팔아요' }[rodShopKind] || ''}</div>`;
   const grid = document.createElement('div');
   grid.className = 'rodGrid';
   list.appendChild(grid);
@@ -3063,7 +3149,12 @@ function renderRodShop() {
     row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${r.name}</div>${r.perk ? `<div class="perk">${r.perk}</div>` : ''}${statsHTML(r)}</div>`;
     const btn = document.createElement('button');
     btn.className = 'actBtn';
+    const sealInfo = r.seal ? SEALS.find((q) => q.id === r.seal) : null;
     if (owned) { btn.textContent = '보유 중'; btn.disabled = true; }
+    else if (sealInfo && (save.ruby[r.seal] || 0) < sealInfo.need) { // 봉인이 아직 안 풀렸어요
+      btn.textContent = `봉인됨 · ${sealInfo.name}`; btn.disabled = true;
+      row.querySelector('.info').insertAdjacentHTML('beforeend', `<div class="perk" style="color:#ff8a9a">루비 신전 ${sealInfo.name}: [${sealInfo.mut}] ${sealInfo.fish} ${sealInfo.need}마리를 바치면 풀려요 (${save.ruby[r.seal] || 0}/${sealInfo.need}) · 가격 ${money(r.price)}</div>`);
+    }
     else {
       btn.textContent = money(r.price);
       btn.disabled = save.money < r.price;
@@ -3101,7 +3192,7 @@ function renderChart() {
   const base = rarityChances(0), now = rarityChances(L);
   const rows = Object.entries(RARITY).map(([k, R]) => {
     // 사는 곳 표시: (산) = 산 위 연못, (비) = 비 올 때만
-    const names = FISH.filter((f) => f.rarity === k).map((f) => (save.dex[f.name] ? f.name : '???') + (f.weather === 'rain' ? '(비)' : ({ mountain: '(산)', aurora: '(오로라)', sea: '(바다)', jungle: '(정글)' })[fishZone(f)] || '')).join(', ');
+    const names = FISH.filter((f) => f.rarity === k).map((f) => (save.dex[f.name] ? f.name : '???') + (f.season ? `(${({ spring: '봄', summer: '여름', autumn: '가을', winter: '겨울' })[f.season]})` : f.weather === 'rain' ? '(비)' : ({ mountain: '(산)', aurora: '(오로라)', sea: '(바다)', jungle: '(정글)', ruby: '(루비)' })[fishZone(f)] || '')).join(', ');
     return `<tr><td style="color:${R.color};font-weight:900">${R.label}</td><td>${pct(base[k])}</td><td>${pct(now[k])}</td><td class="fishNames">${names}</td></tr>`;
   }).join('');
   const boost = 1 + L * 1.5;
@@ -3148,7 +3239,8 @@ function renderSell() {
 }
 
 // ---------- 창 열고 닫기 ----------
-const panels = () => [ui.dexPanel, ui.rodShopPanel, ui.sellPanel, $('setPanel'), $('cookPanel'), $('multiPanel'), $('dressPanel'), $('boatPanel'), $('housePanel'), $('tankPanel'), $('cloudPanel')];
+const extraPanels = []; // life.js 같은 다른 파일이 만든 창들
+const panels = () => [...extraPanels, ui.dexPanel, ui.rodShopPanel, ui.sellPanel, $('setPanel'), $('cookPanel'), $('multiPanel'), $('dressPanel'), $('boatPanel'), $('housePanel'), $('tankPanel'), $('cloudPanel')];
 const modalOpen = () => panels().some((p) => !p.classList.contains('hidden'));
 function openPanel(p) {
   panels().forEach((x) => x.classList.add('hidden'));
@@ -3275,10 +3367,15 @@ function interact() {
   if (s.kind === 'boat') { renderBoatShop(); openPanel($('boatPanel')); return; }
   if (s.kind === 'boatcall') { summonBoat(s.caller); return; }
   if (s.kind === 'house') { openHouse(s.house); return; }
+  if (life && life.interact(s)) return; // 가구점 · 채집 · 텃밭 · 반려동물 등 (life.js)
   if (s.kind === 'thing') { useThing(s.thing); return; }
   if (s.kind === 'furn') { if (houseOwned(s.house)) useFurniture(s.house, s.furn); return; }
   if (s.kind === 'tank') { if (save.homes.includes(s.house.id)) { tankHouse = s.house; renderTank(); openPanel($('tankPanel')); } return; }
-  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3' || s.kind === 'rod4') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora', rod4: 'jungle' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
+  if (s.kind === 'mtank') { openMuseumTank(s.tank); return; }   // 박물관 어항
+  if (s.kind === 'rubyseal') { openSeal(s.sealIdx); return; }    // 루비 신전 봉인
+  if (s.kind === 'ferry') { useFerry(s.to); return; }            // 루비 섬 정기선
+  if (s.kind === 'museumdesk') { openMuseumDesk(); return; }     // 박물관 안내 데스크
+  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3' || s.kind === 'rod4' || s.kind === 'rod5') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora', rod4: 'jungle', rod5: 'ruby' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
   else { renderSell(); openPanel(ui.sellPanel); }
 }
 
@@ -3503,12 +3600,17 @@ function cast() {
   const tx = person.position.x + fwdX * dist, tz = person.position.z + fwdZ * dist;
   // 떨어진 곳의 물을 찾아요 (언덕 위 연못이면 물 높이도 높아요)
   const wtr = waterAt(tx, tz);
-  game.inWater = !!wtr && !onDock(tx, tz) && (!onIsland(tx, tz) || !!wtr.jungle);
+  game.inWater = !!wtr && !onDock(tx, tz) && (!onIsland(tx, tz) || !!wtr.jungle || !!wtr.lagoon);
   game.castWater = game.inWater ? wtr : null;
   // 정글 물고기는 너무 힘이 세서 정글 공방 낚싯대로만 낚을 수 있어요
   if (game.inWater && wtr.jungle && curRod().shop !== 'jungle') {
     game.inWater = false; game.castWater = null;
     game.blockMsg = '정글 물고기는 힘이 너무 세요! 정글 공방 낚싯대로만 낚을 수 있어요.';
+  }
+  // 루비 물고기는 더 세서 루비 공방 낚싯대로만 낚을 수 있어요
+  if (game.inWater && wtr.ruby && curRod().shop !== 'ruby') {
+    game.inWater = false; game.castWater = null;
+    game.blockMsg = '루비 물고기는 보석처럼 단단하고 힘이 엄청 세요! 루비 공방 낚싯대로만 낚을 수 있어요.';
   }
   game.waterY = game.inWater ? wtr.y : groundY(tx, tz);
   game.bobberTarget.set(tx, game.waterY + (game.inWater ? 0.16 : 0.13), tz);
@@ -3528,7 +3630,7 @@ function cast() {
 function startReel() {
   // 산 위 연못처럼 운 보너스가 있는 물이면 더해 줘요
   // 산 위 연못이면 그곳에만 사는 신기한 물고기가 나와요
-  const fish = glitchify(rollFish(curRod().luck + (game.castWater?.luck || 0) + (isNight() ? 0.05 : 0) + buffLuck(), game.castWater?.zone || 'lake', isRaining())); // 밤에는 운 +5%, 글리치의 날엔 글리치
+  const fish = glitchify(rollFish(curRod().luck + (game.castWater?.luck || 0) + (isNight() ? 0.05 : 0) + buffLuck() + life.luckBonus(), game.castWater?.zone || 'lake', isRaining(), getSeason())); // 밤에는 운 +5%, 글리치의 날엔 글리치
   const f = findFish(fish.name);
   const R = RARITY[f.rarity];
   // 초록 칸 크기는 낚싯대가 정해요 (어떤 물고기든 같아요). 물고기 희귀도는 날뛰는 속도만 바꿔요.
@@ -3554,6 +3656,7 @@ function finishCatch() {
   const item = { id: save.nextId++, ...fish };
   save.inv.push(item);
   writeSave();
+  try { life.onCatch(fish, isNew); } catch (e) { console.warn('[수첩]', e); } // 도감 보상 확인
 
   game.notice = `${m ? mutHTML(fish.mut) + ' ' : ''}<span style="color:${R.color}">${esc(fish.name)}</span> ${esc(fmtKg(fish.weight))}를 낚았어요!`;
   game.state = 'caught';
@@ -3657,7 +3760,7 @@ window.addEventListener('keydown', (e) => {
   if (mk) { keys[mk] = true; e.preventDefault(); }
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyB') toggleBag(); // 가방 열고 닫기
-  if (e.code === 'KeyF' && !e.repeat) setFirstPerson(!cam.fp); // 1인칭 켜고 끄기
+  if (e.code === 'KeyF' && !e.repeat && !game.room) setFirstPerson(!cam.fp); // 1인칭 켜고 끄기 (집 안에선 안 돼요)
   if (e.code === 'KeyV' && !e.repeat) toggleBoat(); // 보트 타기/내리기
   // 달리기 켜기/끄기: Ctrl 을 한 번 눌렀다 떼요 (꾹 누른 채 W 를 누르면 브라우저 탭이 닫히니 조심!)
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) { e.preventDefault(); game.running = !game.running; $('runHud').classList.toggle('hidden', !game.running); }
@@ -3705,6 +3808,7 @@ window.addEventListener('pointerup', (e) => {
   if (e.button === 2) dragging = false;
 });
 function turnCamera(dx, dy, k) {
+  if (game.room) return; // 집 안은 고정 시점
   const s = opts.sens * k;
   cam.yaw -= dx * s;
   cam.pitch = Math.min(1.25, Math.max(0.05, cam.pitch + dy * s * 0.7 * (opts.invert ? -1 : 1)));
@@ -3719,6 +3823,7 @@ window.addEventListener('pointermove', (e) => {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 // 휠: 멀리/가까이. 가장 가까운 데서 한 번 더 당기면 1인칭, 1인칭에서 밀면 다시 3인칭
 canvas.addEventListener('wheel', (e) => {
+  if (game.room) return;
   if (cam.fp) { if (e.deltaY > 0) setFirstPerson(false); return; }
   if (cam.dist <= 5.01 && e.deltaY < 0) { setFirstPerson(true); return; }
   cam.dist = Math.min(18, Math.max(5, cam.dist + e.deltaY * 0.01));
@@ -3734,17 +3839,27 @@ function setFirstPerson(on) {
 // 걸어갈 수 있는 곳인지 확인
 const BOUNDS = { x0: -74, x1: 44, z0: -48, z1: 24 };
 // 바다 쪽: 모래사장 + 바다 + 섬은 원래 경계 밖이어도 갈 수 있어요
-const inSeaArea = (x, z) => ((x - SEA.x) / (SEA.rx + SEA.pad - 1)) ** 2 + ((z - SEA.z) / (SEA.rz + SEA.pad - 1)) ** 2 < 1;
+const inSeaArea = (x, z) => ((x - SEA.x) / (SEA.rx + SEA.pad - 1)) ** 2 + ((z - SEA.z) / (SEA.rz + SEA.pad - 1)) ** 2 < 1 ||
+  ((x - RUBY_SEA.x) / (RUBY_SEA.rx + 6)) ** 2 + ((z - RUBY_SEA.z) / (RUBY_SEA.rz + 6)) ** 2 < 1 || ((x - RUBY_STRAIT.x) / RUBY_STRAIT.rx) ** 2 + ((z - RUBY_STRAIT.z) / RUBY_STRAIT.rz) ** 2 < 1; // 루비 바다 · 해협
 const WADE = 0.32;  // 얕은 물에 들어가면 이만큼 잠겨요
 const SWIM = 1.05;  // 깊은 물에서 헤엄칠 때는 이만큼 잠겨요 (머리만 물 위로)
 const ISLAND_TOP = 0.25;
 // function 으로 만들어서 게임이 켜지는 도중(이 줄보다 먼저)에 불러도 돼요
 function inJunglePond(x, z) { return ((x - JUNGLE_POND.x) / JUNGLE_POND.rx) ** 2 + ((z - JUNGLE_POND.z) / JUNGLE_POND.rz) ** 2 < 1; }
+function inRubyPond(x, z) { return ((x - RUBY_LAGOON.x) / RUBY_LAGOON.rx) ** 2 + ((z - RUBY_LAGOON.z) / RUBY_LAGOON.rz) ** 2 < 1; }
+function onRuby(x, z) { return (x - RUBY.x) ** 2 + (z - RUBY.z) ** 2 < RUBY.r * RUBY.r; } // function 이라 게임이 켜지는 도중에 불러도 돼요
 const isSwimSpot = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && !onBridge2(x, z) && inLake(x, z) && !isShallow(x, z);
 // 발이 닿는 높이: 부두 / 계단 / 섬 / 깊은 물(수영) / 얕은 물 / 언덕 위 / 땅
 function groundY(x, z) {
+  if (z < -900 && museum.inside(x, z)) return museum.room.floorY;   // 박물관 전시관 바닥
+  if (z < -300 && seaWorld.inRoom(x, z)) return ISLAND_TOP + 0.05; // 집 안 방 마루
+  if (x > 55 && x < 70) { const my = museum.groundAt(x, z); if (my !== null) return my; } // 박물관 현관 계단
   if (onDock(x, z)) return 0.26;
   if (inJunglePond(x, z)) return JUNGLE_POND.y - WADE; // 섬 안 연못은 섬보다 먼저 봐요
+  if (z > 250) { // 루비 섬: 호수 → 신전 받침 · 계단 → 울퉁불퉁한 땅 (ruby.js)
+    if (inRubyPond(x, z)) return RUBY_LAGOON.y - WADE;
+    if (onRuby(x, z)) return templeGround(x, z) ?? rubyHeight(x, z);
+  }
   if (onStairs(x, z)) return stairHeight(z) - 0.08;
   if (onIsland(x, z)) return ISLAND_TOP;
   if (onBridge(x, z)) return BRIDGE.y;
@@ -3756,7 +3871,9 @@ function groundY(x, z) {
 }
 // noSwim = true 면 깊은 물에는 못 들어가요 (돌아다니는 NPC 들은 헤엄치지 않아요)
 function walkable(x, z, fromX, fromZ, noSwim = false) {
-  if ((x < BOUNDS.x0 || x > BOUNDS.x1 || z < BOUNDS.z0 || z > BOUNDS.z1) && !inSeaArea(x, z)) return false;
+  if ((x < BOUNDS.x0 || x > BOUNDS.x1 || z < BOUNDS.z0 || z > BOUNDS.z1) && !inSeaArea(x, z) && !(z < -300 && seaWorld.inRoom(x, z)) && !museum.inArea(x, z) && !(z < -900 && museum.inside(x, z))) return false;
+  if ((x > 40 || z < -900) && museum.blocked(x, z)) return false; // 박물관 건물 · 어항 · 벽
+  if (z > 250 && ruby && ruby.blocked(x, z)) return false;           // 루비 섬 건물
   for (const c of colliders) if ((x - c.x) ** 2 + (z - c.z) ** 2 < c.r * c.r) return false;
   if (noSwim && (onIsland(x, z) || isSwimSpot(x, z))) return false;
   // 높이 차이가 크면(절벽) 못 올라가고 못 뛰어내려요. 계단은 한 칸씩이라 괜찮아요.
@@ -3796,7 +3913,7 @@ function updatePlayer(dt) {
     const p = person.position;
     if (walkable(p.x + dx * step, p.z, p.x, p.z)) p.x += dx * step;
     if (walkable(p.x, p.z + dz * step, p.x, p.z)) p.z += dz * step;
-    if (!shiftLocked) {
+    if (!shiftLocked || game.room) {
       const want = Math.atan2(-dx, -dz);
       let diff = want - player.ry;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -3805,7 +3922,7 @@ function updatePlayer(dt) {
     player.walkT += dt * (game.running && !game.swimming ? 14 : 9);
   }
   // 시프트 락 중에는 항상 카메라가 보는 쪽을 바라봐요 (게 걸음 가능)
-  if ((shiftLocked || cam.fp) && game.state !== 'reeling') player.ry = cam.yaw; // 1인칭도 보는 쪽을 바라봐요
+  if ((shiftLocked || cam.fp) && !game.room && game.state !== 'reeling') player.ry = cam.yaw; // 1인칭도 보는 쪽을 바라봐요
   person.rotation.y = player.ry;
   const gy = groundY(person.position.x, person.position.z);
   const wasSwimming = game.swimming;
@@ -3848,8 +3965,9 @@ function updatePlayer(dt) {
     const st = game.sitting;
     person.position.set(st.x, st.y ?? -0.24, st.z);
     player.ry = st.ry;
+    person.rotation.order = 'YXZ'; // 먼저 방향을 돌리고, 그다음 몸 기준으로 눕혀요 (옆으로 기울지 않게)
     person.rotation.y = st.ry;
-    person.rotation.x = st.lie ? -1.3 : 0; // 해먹은 뒤로 누워요
+    person.rotation.x = st.lie ? 1.42 : 0; // 해먹: 하늘을 보고 뒤로 누워요 (머리 = 몸 뒤쪽)
     if (st.swing) { // 그네: 줄에 매달린 의자와 같이 앞뒤로
       const a = Math.sin(performance.now() * 0.0024) * 0.55, g = st.swing, L = 1.86;
       g.rotation.x = a;
@@ -3857,15 +3975,16 @@ function updatePlayer(dt) {
       const c = Math.cos(g.rotation.y), sn = Math.sin(g.rotation.y);
       person.position.set(g.position.x + oz * sn, g.position.y + oy - 0.5, g.position.z + oz * c);
     }
-    hero.legs.forEach((l) => (l.rotation.x = Math.PI / 2));
+    hero.legs.forEach((l) => (l.rotation.x = st.lie ? 0.12 : Math.PI / 2)); // 누우면 다리를 쭉 펴요
   }
 
   // 가까운 상점 찾기
   game.nearShop = null;
   let shopD = Infinity;
   for (const s of shops) {
-    const d = (person.position.x - s.pos.x) ** 2 + (person.position.z - s.pos.z) ** 2;
-    if (d < 2.4 * 2.4 && d < shopD) { game.nearShop = s; shopD = d; } // 제일 가까운 곳으로
+    if (s.off) continue; // 꺼진 곳 (주워 간 채집물 등)
+    const d = (person.position.x - s.pos.x) ** 2 + (person.position.z - s.pos.z) ** 2, rr = s.r || 2.4;
+    if (d < rr * rr && d < shopD) { game.nearShop = s; shopD = d; } // 제일 가까운 곳으로
   }
   // 가까운 사람 찾기 (말 걸기). 상점보다 더 가까우면 사람이 먼저예요
   game.nearTalk = null;
@@ -3893,6 +4012,7 @@ function updatePlayer(dt) {
 // ---------- 말 걸기 ----------
 // NPC 혼자서만 말해요. 가끔은 시간대에 맞는 말을 해요.
 function talkTo(n) {
+  try { life.onTalk(n); } catch (e) { console.warn('[친구]', e); } // 말 걸면 조금씩 친해져요 (life.js · friends.js)
   if (n.name === '고수 할배' && grandpaTalk(n)) return; // 할배는 부탁을 주고받아요
   const now = performance.now();
   let text;
@@ -3948,7 +4068,8 @@ const josa = (word, a, b) => {
   const c = word.charCodeAt(word.length - 1);
   return word + (c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 ? a : b);
 };
-const whereOf = (f) => (f.weather === 'rain' ? '비 오는 날 큰 호수' : fishZone(f) === 'mountain' ? '산 위 연못' : fishZone(f) === 'aurora' ? '오로라 강' : '큰 호수');
+const SEASON_KO = { spring: '봄', summer: '여름', autumn: '가을', winter: '겨울' };
+const whereOf = (f) => (f.season ? `${SEASON_KO[f.season]}의 큰 호수` : f.weather === 'rain' ? '비 오는 날 큰 호수' : fishZone(f) === 'mountain' ? '산 위 연못' : fishZone(f) === 'aurora' ? '오로라 강' : '큰 호수');
 
 // =====================================================
 //  고수 할배의 부탁 — 물고기를 잡아다 주면 보상을 줘요
@@ -3956,7 +4077,7 @@ const whereOf = (f) => (f.weather === 'rain' ? '비 오는 날 큰 호수' : fis
 function newQuest() {
   // 신화·거대 물고기는 빼고, 흔한 것부터 전설까지 골고루
   const W = { common: 3, uncommon: 3, rare: 2.4, legendary: 1.1 };
-  const pool = FISH.filter((f) => W[f.rarity] && !f.huge);
+  const pool = FISH.filter((f) => W[f.rarity] && !f.huge && (!f.season || f.season === getSeason())); // 계절 물고기는 그 계절에만 부탁해요
   let total = pool.reduce((s, f) => s + W[f.rarity] * (f.weather ? 0.6 : 1), 0);
   let r = Math.random() * total, pick = pool[0];
   for (const f of pool) { r -= W[f.rarity] * (f.weather ? 0.6 : 1); if (r <= 0) { pick = f; break; } }
@@ -4252,12 +4373,21 @@ function updateWade(t) {
   });
 }
 
+const roomCam = { t: new THREE.Vector3(), ready: false };
 function updateCamera() {
   const p = person.position;
   const ty = p.y + 1.5;
   // 그림자가 주인공 주변에 생기도록 해를 같이 옮겨요
   sunsetLight.position.set(p.x - 9, 15, p.z + 7);
   sunsetLight.target.position.set(p.x, 0, p.z);
+  // 테스트용 고정 카메라 (개발자 콘솔에서 window.__debugCam = { pos: [x,y,z], look: [x,y,z] } 로 켜요)
+  const dc = window.__debugCam;
+  if (dc && dc.pos && dc.look) {
+    camera.position.set(dc.pos[0], dc.pos[1], dc.pos[2]);
+    camera.lookAt(dc.look[0], dc.look[1], dc.look[2]);
+    sun.lookAt(camera.position); halo.lookAt(camera.position);
+    return;
+  }
   // 망원경으로 보는 중: 멀리 확대해서 봐요
   if (teleView && performance.now() < teleView.until) {
     camera.position.copy(teleView.from);
@@ -4267,6 +4397,21 @@ function updateCamera() {
     return;
   }
   if (teleView) { teleView = null; camera.fov = 43; camera.updateProjectionMatrix(); }
+  // 집 안: 방 앞쪽 위에서 비스듬히 내려다보는 고정 시점 (모동숲처럼). 나를 따라가되 방 밖은 안 비춰요
+  if (game.room) {
+    const R = game.room, hw = R.rw / 2, hd = R.rd / 2;
+    const span = Math.max(0, hw - 7.5), spanZ = Math.max(0, hd - 5.5);
+    const tx = R.x + Math.max(-span, Math.min(span, p.x - R.x));
+    const tz = R.z + Math.max(-spanZ, Math.min(spanZ, p.z - R.z)) - 0.4;
+    const want = tmpV.set(tx, R.floorY + 0.4, tz);
+    if (!roomCam.ready) { roomCam.t.copy(want); roomCam.ready = true; }
+    roomCam.t.lerp(want, 0.08);
+    const D = 16 + Math.max(0, Math.min(3, (R.rd - 10) * 0.4)), A = 0.96; // 거리 · 내려다보는 각도
+    camera.position.set(roomCam.t.x, roomCam.t.y + Math.sin(A) * D, roomCam.t.z - Math.cos(A) * D);
+    camera.lookAt(roomCam.t);
+    sun.lookAt(camera.position); halo.lookAt(camera.position);
+    return;
+  }
   // 1인칭: 눈 높이에서 보는 쪽으로 (마우스 위아래 = 고개 들기/숙이기)
   if (cam.fp) {
     const look = (0.65 - cam.pitch) * 1.4;
@@ -4319,7 +4464,7 @@ function updatePrompt() {
   const v = at.project(camera);
   if (v.z > 1) { ui.prompt.classList.add('hidden'); return; }
   ui.prompt.classList.remove('hidden');
-  const label = n ? `말 걸기 · ${n.name}` : s ? s.title : '모닥불 · 앉아서 굽기';
+  const label = n ? `말 걸기 · ${n.name}  ·  G 선물` : s ? s.title : '모닥불 · 앉아서 굽기';
   if (ui.promptText.textContent !== label) ui.promptText.textContent = label;
   // 화면 밖으로 삐져나가지 않게 가장자리에서 멈추고, 부드럽게 따라가요
   const half = ui.prompt.offsetWidth / 2 + 8;
@@ -4602,11 +4747,14 @@ function animate(now) {
   updateWade(t);
   updateShopBoats(t);
   updateHouses(t);
+  updateDoors();
   updateIslandHud(now);
   // 꾸밈 효과들: 혹시 여기서 문제가 생겨도 게임 전체가 멈추지 않게 따로 감싸요
   try { updateFishFx(t); } catch (e) { console.warn('[이로치 이펙트]', e); } // 이로치 반짝이·지직
   try { updateGlitchDay(now); } catch (e) { console.warn('[글리치의 날]', e); }
   try { updateThings(t); } catch (e) { console.warn('[섬 물건]', e); }
+  try { ruby.update(t); } catch (e) { console.warn('[루비 섬]', e); }
+  try { life.update(dt, t, now); } catch (e) { console.warn('[생활]', e); }
 
   updateDressCam();
   updateCamera();
@@ -4645,7 +4793,7 @@ window.setGameState = (patch = {}) => {
   else if (patch.state) game.state = patch.state;
   updateUI();
 };
-window.__game = { scene, camera, renderer, player: person, fishingLine, bobber, walkers };
+window.__game = { scene, camera, renderer, player: person, fishingLine, bobber, walkers, groundY, walkable, seaWorld, museum, ruby, cam, game, save, buildRod, RODS, get room() { return game.room; } };
 
 // =====================================================
 //  멀티플레이 연결 (같은 방 최대 5명)
@@ -4688,6 +4836,7 @@ function pushFeed(text) {
 const multi = setupMulti({
   THREE, scene, makeBlockPerson, buildRod, placeSpin, RODS, ROD_LEN, makeBobber, cordMat, makeNameTag,
   makeFishModel, findFish, fishScale, getMyState, onFeed: pushFeed, outfitToLook, makeBoatModel, getOutfit: () => save.outfit,
+  onFx: (r, m) => { try { life.onFx(r, m); } catch (e) { console.warn('[같이 놀기]', e); } }, // 친구가 쏜 불꽃놀이 · 손 흔들기
   onStatus: (text, ok, info) => {
     $('multiStatus').textContent = text;
     $('multiStatus').className = 'multiStatus' + (ok ? ' ok' : '');
@@ -5086,23 +5235,18 @@ function houseOther(h) {
 function syncHouse(h) {
   const own = houseOwned(h);
   if (own && !h.open) {
-    h.open = true;
-    for (const c of h.doorCol) { const i = colliders.indexOf(c); if (i >= 0) colliders.splice(i, 1); }
-    h.door.rotation.y = -Math.PI / 2;            // 문이 안쪽으로 활짝
-    h.door.position.x = h.x - 0.85; h.door.position.z = h.z0 + 0.9;
+    h.open = true;                                // 문은 그대로 닫혀 있고, 다가가면 방으로 들어가요 (enterHouse)
   } else if (!own && h.open) {
-    h.open = false;                               // 다시 잠가요 (집을 내놓았거나 다른 사람 집이 됐을 때)
-    for (const c of h.doorCol) if (!colliders.includes(c)) colliders.push(c);
-    h.door.rotation.y = 0;
-    h.door.position.x = h.x; h.door.position.z = h.z0;
+    h.open = false;                               // 집을 내놓았거나 다른 사람 집이 됐을 때
     for (const f of h.fish) scene.remove(f.model);
     h.fish = [];
+    if (game.room === h) exitHouse(h, true);
   }
   const other = houseOther(h);
   // 디자인: 내 집이면 내가 고른 것, 남의 집이면 주인이 고른 것, 아니면 처음 디자인
   h.setStyle(own && save.houseStyles[h.id] !== undefined ? save.houseStyles[h.id] : other && other.style !== null ? other.style : h.defaultStyle);
-  const entry = shops.find((s) => s.kind === 'house' && s.house === h);
-  if (entry) entry.title = own ? `${h.name} · 내 집 (E 로 디자인 바꾸기)` : other ? `${h.name} · ${other.name} 님의 집` : `${h.name} · ${money(h.price)} (E 로 구경·구매)`;
+  const entry = shops.find((s) => s.kind === 'house' && s.house === h && !s.roomEntry);
+  if (entry) entry.title = own ? `${h.name} · 내 집 (문으로 걸어가면 들어가요 · E 관리)` : other ? `${h.name} · ${other.name} 님의 집` : `${h.name} · ${money(h.price)} (E 로 구경·구매)`;
   if (own) rebuildTankFish(h);
 }
 // 내 집 하나를 잃을 때 (다른 사람이 먼저 샀거나, 내가 내놓을 때): 어항 물고기는 가방으로, 돈은 refund 만큼 돌려받아요
@@ -5113,6 +5257,7 @@ function loseHouse(h, refund) {
   delete save.houseStyles[h.id];
   save.homes = save.homes.filter((x) => x !== h.id);
   save.money = Math.min(MAX_MONEY, save.money + refund);
+  if (typeof life !== 'undefined') life.houseChanged(h.id, null); // 놓아둔 가구는 가구 가방으로
   writeSave();
   syncHouse(h); renderHotbar(); updateUI();
 }
@@ -5141,6 +5286,87 @@ function onHouseOwners(map) {
   reconcileHouses();
 }
 
+// =====================================================
+//  집 들어가기 · 나가기: 화면이 까맣게 → 방(또는 문 앞)으로 이동 → 다시 밝게 (모동숲처럼)
+// =====================================================
+let roomMove = null; // 옮겨 가는 중이면 { until }
+let camBeforeRoom = null;
+function fadeMove(fn) {
+  if (roomMove) return;
+  const fade = $('sleepFade');
+  roomMove = { at: performance.now() };
+  fade.classList.add('on');
+  tone(520, 0.08, 'triangle', 0.04); tone(392, 0.12, 'triangle', 0.035, 0.1); // 문 소리 (딸깍 끼익)
+  setTimeout(() => {
+    try { fn(); } catch (e) { console.warn('[집]', e); }
+    setTimeout(() => { fade.classList.remove('on'); roomMove = null; }, 180);
+  }, 620);
+}
+function enterHouse(h, then) {
+  if (game.room || !houseOwned(h)) return;
+  if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+  if (game.rodOut || game.selected) equip(null);
+  if (game.sitting) standUp();
+  fadeMove(() => {
+    camBeforeRoom = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, fp: cam.fp };
+    if (cam.fp) setFirstPerson(false);
+    cam.yaw = Math.PI; // 방에서는 앞쪽(-z)에 카메라가 있어요 → W 가 방 안쪽으로
+    game.room = h; game.indoors = true; roomCam.ready = false;
+    person.position.set(h.enterAt.x, groundY(h.enterAt.x, h.enterAt.z), h.enterAt.z);
+    player.ry = Math.PI; person.rotation.y = player.ry;
+    game.notice = `${h.name}에 들어왔어요. 문 앞 매트를 밟으면 밖으로 나가요.`; updateUI();
+    if (then) then();
+  });
+}
+// 박물관처럼 누구나 들어가는 곳 (집처럼 문으로 걸어가면 화면이 까매졌다가 안으로)
+function enterRoom(h) {
+  if (game.room) return;
+  if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+  if (game.rodOut || game.selected) equip(null);
+  if (game.sitting) standUp();
+  fadeMove(() => {
+    camBeforeRoom = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, fp: cam.fp };
+    if (cam.fp) setFirstPerson(false);
+    cam.yaw = Math.PI;
+    game.room = h; game.indoors = true; roomCam.ready = false;
+    person.position.set(h.enterAt.x, groundY(h.enterAt.x, h.enterAt.z), h.enterAt.z);
+    player.ry = Math.PI; person.rotation.y = player.ry;
+    if (h.museum) museum.refresh();
+    game.notice = `${h.name}에 들어왔어요. 어항 앞에서 E 로 물고기를 기증해요. 문 앞 매트를 밟으면 밖으로 나가요.`; updateUI();
+  });
+}
+function exitHouse(h, now) {
+  if (!game.room) return;
+  const go = () => {
+    if (typeof life !== 'undefined' && life.decorating) life.stopDecor && life.stopDecor();
+    game.room = null; game.indoors = false;
+    const e = h.ext;
+    if (e.out) { person.position.set(e.out.x, groundY(e.out.x, e.out.z), e.out.z); player.ry = e.out.ry; person.rotation.y = e.out.ry; } // 박물관: 계단 앞, 광장 쪽을 보고
+    else { person.position.set(e.doorX, groundY(e.doorX, e.doorZ - 2.0), e.doorZ - 2.0);
+    player.ry = 0; person.rotation.y = 0; } // 바다 쪽(본토 쪽)을 보고 나와요
+    if (camBeforeRoom) { cam.yaw = camBeforeRoom.yaw; cam.pitch = camBeforeRoom.pitch; cam.dist = camBeforeRoom.dist; camBeforeRoom = null; }
+    game.notice = ''; updateUI();
+  };
+  if (now) go(); else fadeMove(go);
+}
+// 문 앞으로 걸어가면 들어가고, 방 안 매트를 밟으면 나가요
+function updateDoors() {
+  if (roomMove || modalOpen() || game.sitting || game.inBoat) return;
+  const p = person.position;
+  if (game.room) {
+    const h = game.room;
+    if (Math.abs(p.x - h.exitAt.x) < 0.75 && p.z < h.exitAt.z && player.moving && Math.cos(player.ry) > 0.3) exitHouse(h);
+    return;
+  }
+  // 박물관 문: 현관에서 동쪽(문 쪽)으로 걸어가면 들어가요 (ry = π/2 면 -x, -π/2 면 +x 쪽을 봐요)
+  { const e = museum.room.ext; if (Math.abs(p.z - e.doorZ) < 1.3 && p.x > e.doorX - 0.9 && p.x < e.doorX + 0.6 && player.moving && Math.sin(player.ry) < -0.3) { enterRoom(museum.room); return; } }
+  for (const hid of save.homes) {
+    const h = seaWorld.houses.find((q) => q.id === hid);
+    if (!h) continue;
+    const e = h.ext;
+    if (Math.abs(p.x - e.doorX) < 0.9 && p.z > e.doorZ - 0.85 && p.z < e.doorZ && player.moving && Math.cos(player.ry) < -0.3) { enterHouse(h); return; }
+  }
+}
 // 앉아 있다가 일어나기 (모닥불 통나무면 불 반대쪽으로 한 걸음, 집 가구면 정해 둔 자리로)
 function standUp() {
   const st = game.sitting;
@@ -5202,7 +5428,7 @@ function useFurniture(h, f) {
     tone(880, 0.06, 'triangle', 0.03);
   } else if (f.type === 'tea') {
     softBuff(0.03, 150);
-    game.notice = '따뜻한 차를 한 잔 마셨어요. (따뜻함: 운 +3% · 2분 30초) E 로 일어나요.';
+    game.notice = `따뜻한 차를 한 잔 마셨어요. (따뜻함: 운 +3% · 2분 30초)${f.seat ? ' E 로 일어나요.' : ''}`;
     tone(523, 0.1, 'triangle', 0.05); tone(659, 0.12, 'triangle', 0.05, 0.12);
   } else if (f.type === 'piano') {
     // 짧은 노래 한 소절 (도레미…)
@@ -5222,7 +5448,9 @@ function useThing(t) {
   const front = (d) => [t.x - Math.sin(t.ry || 0) * d, t.z - Math.cos(t.ry || 0) * d];
   if (t.type === 'hammock') {
     if (game.rodOut || game.selected) equip(null);
-    game.sitting = { x: t.x, y: (t.y ?? -0.08) + 0.35, z: t.z, ry: (t.ry || 0) + Math.PI / 2, lie: true, house: true, stand: front(1.4) };
+    // 발이 아니라 몸 한가운데(엉덩이쯤)가 해먹 한가운데 오게: 발을 몸 앞쪽으로 0.85칸 옮겨요
+    const lry = (t.ry || 0) + Math.PI / 2;
+    game.sitting = { x: t.x - Math.sin(lry) * 0.85, y: (t.y ?? -0.08) + 0.62, z: t.z - Math.cos(lry) * 0.85, ry: lry, lie: true, house: true, stand: front(1.4) };
     game.notice = '해먹에 누웠어요. 살랑살랑… (E 또는 방향키로 일어나요)';
   } else if (t.type === 'swing') {
     if (game.rodOut || game.selected) equip(null);
@@ -5291,10 +5519,22 @@ function openHouse(h) {
   const own = houseOwned(h);
   const other = houseOther(h);
   const slots = HOUSE_INFO[h.id].slots;
-  box.innerHTML = `<div class="count"><b>${esc(h.name)}</b> — 섬 위의 커다란 집이에요. 안에는 소파·침대·벽난로·책장, 그리고 물고기 <b>${slots}마리</b>를 전시할 수 있는 커다란 어항이 있어요.${own ? '' : ` 사면 디자인 ${HOUSE_STYLES.length}가지 중에서 골라 꾸밀 수 있어요.`}<br>집은 섬마다 한 채, <b>먼저 산 사람이 주인</b>이고 한 사람당 한 채만 살 수 있어요.</div>`;
+  box.innerHTML = `<div class="count"><b>${esc(h.name)}</b> — 섬 위의 커다란 집이에요. 안에는 소파·침대·벽난로·책장, 그리고 물고기 <b>${slots}마리</b>를 전시할 수 있는 커다란 어항이 있어요.${own ? '' : ` 사면 디자인 ${HOUSE_STYLES.length}가지 중에서 골라 꾸밀 수 있어요.`}<br>집은 섬마다 한 채, <b>먼저 산 사람이 주인</b>이고 한 사람당 한 채예요. 다른 빈 집 앞에서 <b>이사</b>할 수 있어요 (어항 물고기도 같이 가요).</div>`;
   const btn = document.createElement('button');
   btn.className = 'actBtn';
   if (own) {
+    const deco = document.createElement('button');
+    deco.className = 'actBtn'; deco.style.margin = '0 0 8px';
+    deco.textContent = '가구 배치하기 (집 안에서)';
+    deco.onclick = () => { closePanels(); if (game.room === h) life.startDecor(h); else enterHouse(h, () => life.startDecor(h)); };
+    if (game.room !== h) {
+      const enter = document.createElement('button');
+      enter.className = 'actBtn'; enter.style.margin = '0 0 8px 0';
+      enter.textContent = '집에 들어가기';
+      enter.onclick = () => { closePanels(); enterHouse(h); };
+      box.appendChild(enter);
+    }
+    box.appendChild(deco);
     box.appendChild(designList(h));
     // 집 내놓기: 반값을 돌려받고, 다른 사람이 살 수 있게 비워요
     const sell = document.createElement('button');
@@ -5320,8 +5560,46 @@ function openHouse(h) {
     btn.textContent = '로그인해야 살 수 있어요 (설정 → 계정)';
     btn.onclick = () => { closePanels(); renderOpts(); openPanel($('setPanel')); };
   } else if (save.homes.length) {
-    btn.textContent = '집은 한 사람당 한 채만 살 수 있어요';
-    btn.disabled = true;
+    // 이사하기: 지금 집은 반값에 내놓고 새 집으로. 어항 물고기와 디자인을 그대로 옮겨요
+    const old = seaWorld.houses.find((x) => x.id === save.homes[0]);
+    const cost = h.price - Math.floor(old.price / 2); // 더 싼 집이면 마이너스 = 돌려받아요
+    btn.textContent = cost >= 0 ? `이사하기 (${money(cost)} 더 내기 · 가진 돈 ${money(save.money)})` : `이사하기 (${money(-cost)} 돌려받기)`;
+    btn.disabled = save.money < cost;
+    btn.onclick = async () => {
+      const fishN = (save.tanks[old.id] || []).length, newSlots = HOUSE_INFO[h.id].slots;
+      const extra = Math.max(0, fishN - newSlots);
+      if (!confirm(`${old.name} → ${h.name}(으)로 이사할까요?
+
+${cost >= 0 ? money(cost) + '을 더 내요' : money(-cost) + '을 돌려받아요'} (새 집 값 − 지금 집 반값)
+어항 물고기 ${fishN}마리와 집 디자인을 그대로 옮겨요.${extra ? `
+새 어항은 ${newSlots}칸이라 ${extra}마리는 가방으로 가요.` : ''}`)) return;
+      if (save.money < cost || houseOwned(h)) return;
+      btn.disabled = true; btn.textContent = '이사하는 중…';
+      if (cloudEnabled) {
+        // 새 집을 먼저 내 것으로 (다른 사람이 먼저 샀으면 이사 취소), 그다음 옛집을 내놓아요
+        try { await claimHouse(h.id, myUid(), cloud.user.name, save.houseStyles[old.id] ?? h.defaultStyle); }
+        catch (e) {
+          game.notice = e.code === 'taken' ? '아쉬워요! 방금 다른 사람이 먼저 샀어요. 이사를 취소했어요.' : '이사하지 못했어요. 인터넷 연결을 확인해 주세요.';
+          closePanels(); updateUI(); return;
+        }
+        if (houseOwners && houseOwners[old.id] && houseOwners[old.id].owner === myUid()) { try { await releaseHouse(old.id); } catch (_) {} }
+      }
+      // 어항 물고기 옮기기 (넘치면 가방으로), 디자인도 그대로
+      const fish = save.tanks[old.id] || [];
+      save.tanks[h.id] = fish.slice(0, newSlots);
+      save.inv.push(...fish.slice(newSlots));
+      if (save.houseStyles[old.id] !== undefined) save.houseStyles[h.id] = save.houseStyles[old.id];
+      delete save.tanks[old.id]; delete save.houseStyles[old.id];
+      save.homes = [h.id];
+      save.money = Math.min(MAX_MONEY, save.money - cost);
+      life.houseChanged(old.id, h.id); // 놓아둔 가구는 가구 가방으로 돌아와요 (새 집에 다시 놓아요)
+      writeSave();
+      syncHouse(old); syncHouse(h); renderHotbar(); sfx.coin();
+      if (typeof flushCloudSave === 'function') flushCloudSave();
+      closePanels();
+      game.notice = `${h.name}(으)로 이사했어요! 어항 물고기 ${Math.min(fishN, newSlots)}마리도 함께 왔어요.`;
+      updateUI();
+    };
   } else {
     btn.textContent = `${money(h.price)}에 사기 (가진 돈 ${money(save.money)})`;
     btn.disabled = save.money < h.price;
@@ -5341,6 +5619,7 @@ function openHouse(h) {
       save.homes.push(h.id);
       save.tanks[h.id] = [];
       writeSave(); syncHouse(h); sfx.coin();
+      life.houseChanged(null, h.id);
       if (typeof flushCloudSave === 'function') flushCloudSave(); // 계정에도 바로 저장
       closePanels();
       game.notice = `${h.name}을(를) 샀어요! 이제 ${h.name}의 주인이에요. 문이 열렸어요.`;
@@ -5357,36 +5636,174 @@ function renderTank() {
   const list = $('tankList');
   const tank = save.tanks[h.id] || (save.tanks[h.id] = []);
   const slots = HOUSE_INFO[h.id].slots;
-  const row = (it, label, fn) => {
+  // 한 줄: 물고기 이름 + 버튼들 ([글자, 할 일] 여러 개)
+  const row = (it, buttons, tag = '') => {
     const r = document.createElement('div');
     r.className = 'sellRow';
-    r.innerHTML = `<span class="nm">${mutHTML(it.mut) ? mutHTML(it.mut) + ' ' : ''}${esc(it.name)} <span style="color:#aaa;font-weight:400">${esc(fmtKg(it.weight))}</span></span><span class="pr">${money(it.price)}</span>`;
-    const b = document.createElement('button');
-    b.className = 'actBtn'; b.textContent = label; b.onclick = fn;
-    r.appendChild(b);
+    r.innerHTML = `<span class="nm">${mutHTML(it.mut) ? mutHTML(it.mut) + ' ' : ''}${esc(it.name)} <span style="color:#aaa;font-weight:400">${esc(fmtKg(it.weight))}</span>${tag}</span><span class="pr">${money(it.price)}</span>`;
+    for (const [label, fn] of buttons) {
+      const b = document.createElement('button');
+      b.className = 'actBtn'; b.textContent = label; b.onclick = fn;
+      b.style.marginLeft = '4px';
+      r.appendChild(b);
+    }
     return r;
   };
   list.innerHTML = `<h3 class="chartH">어항 (${tank.length} / ${slots})</h3>`;
   if (!tank.length) list.insertAdjacentHTML('beforeend', '<div class="count">아직 비어 있어요. 아래 가방에서 물고기를 넣어 보세요.</div>');
-  tank.forEach((it) => list.appendChild(row(it, '꺼내기', () => {
-    save.tanks[h.id] = save.tanks[h.id].filter((x) => x !== it);
-    save.inv.push(it);
-    writeSave(); rebuildTankFish(h); renderHotbar(); renderTank(); updateUI();
-  })));
+  tank.forEach((it) => list.appendChild(row(it, [
+    [it.big ? '작게 바꾸기' : '원래 크기로', () => { if (it.big) delete it.big; else it.big = true; writeSave(); rebuildTankFish(h); renderTank(); }],
+    ['꺼내기', () => {
+      save.tanks[h.id] = save.tanks[h.id].filter((x) => x !== it);
+      delete it.big;
+      save.inv.push(it);
+      writeSave(); rebuildTankFish(h); renderHotbar(); renderTank(); updateUI();
+    }]
+  ], it.big ? ' <span class="bigTag">원래 크기</span>' : '')));
   list.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 (${save.inv.length}마리)</h3>`);
   if (!save.inv.length) list.insertAdjacentHTML('beforeend', '<div class="count">가방에 물고기가 없어요.</div>');
   for (let i = save.inv.length - 1; i >= 0; i--) {
     const it = save.inv[i];
-    const r = row(it, '넣기', () => {
+    // 넣기: 어항에 맞게 작게 / 삐져나와도 원래 크기 그대로
+    const put = (big) => () => {
       if ((save.tanks[h.id] || []).length >= slots) { game.notice = '어항이 꽉 찼어요. 하나 꺼내고 넣어요.'; updateUI(); return; }
       if (game.selected === it.id) equip(null);
       save.inv = save.inv.filter((x) => x !== it);
+      if (big) it.big = true; else delete it.big;
       save.tanks[h.id].push(it);
       writeSave(); rebuildTankFish(h); renderHotbar(); renderTank(); updateUI();
-    });
-    if (tank.length >= slots) r.querySelector('button').disabled = true;
+    };
+    const r = row(it, [['작게 넣기', put(false)], ['원래 크기로 넣기', put(true)]]);
+    if (tank.length >= slots) r.querySelectorAll('button').forEach((b) => (b.disabled = true));
     list.appendChild(r);
   }
+}
+// =====================================================
+//  박물관: 어항 앞 E → 그 물고기 기증 · 바꾸기 · 꺼내기 / 안내 데스크 E → 현황 · 한 번에 기증 · 완성 보상
+//  (3D 는 museum.js, 기증 기록은 save.museum.fish[이름])
+// =====================================================
+const museumPanel = (() => {
+  const el = document.createElement('div');
+  el.id = 'museumPanel'; el.className = 'modal hidden';
+  el.innerHTML = '<div class="modalBox"><div class="modalHead"><span id="museumTitle">박물관</span><button class="closeBtn">닫기</button></div><div id="museumBody"></div></div>';
+  el.querySelector('.closeBtn').onclick = () => el.classList.add('hidden');
+  el.addEventListener('click', (e) => { if (e.target === el) el.classList.add('hidden'); });
+  document.body.appendChild(el);
+  extraPanels.push(el);
+  return el;
+})();
+let museumTank = null;
+const museumCount = () => Object.keys(save.museum.fish).length;
+// 다 모았으면 보상 (한 번만)
+function checkMuseumReward() {
+  if (save.museum.paid || museumCount() < museum.total) return;
+  save.museum.paid = true;
+  save.money = Math.min(MAX_MONEY, save.money + MUSEUM_REWARD);
+  game.notice = `박물관의 모든 어항을 채웠어요! 관장님이 보상으로 ${money(MUSEUM_REWARD)}을 주셨어요.`;
+  tone(660, 0.2, 'triangle', 0.08); tone(880, 0.25, 'triangle', 0.08, 0.15); tone(1320, 0.4, 'triangle', 0.07, 0.3);
+}
+// 가방 물고기 하나를 어항에 넣어요 (원래 있던 건 가방으로)
+function donateToMuseum(it) {
+  const f = findFish(it.name);
+  if (!f) return;
+  const old = save.museum.fish[f.name];
+  if (game.selected === it.id) equip(null);
+  save.inv = save.inv.filter((x) => x !== it);
+  delete it.big;
+  save.museum.fish[f.name] = it;
+  if (old) save.inv.push(old);
+}
+function museumRow(it, buttons) {
+  const r = document.createElement('div');
+  r.className = 'sellRow';
+  r.innerHTML = `<span class="nm">${mutHTML(it.mut) ? mutHTML(it.mut) + ' ' : ''}${esc(it.name)} <span style="color:#aaa;font-weight:400">${esc(fmtKg(it.weight))}</span></span><span class="pr">${money(it.price)}</span>`;
+  for (const [label, fn] of buttons) {
+    const b = document.createElement('button');
+    b.className = 'actBtn'; b.textContent = label; b.onclick = fn; b.style.marginLeft = '4px';
+    r.appendChild(b);
+  }
+  return r;
+}
+function museumChanged() { checkMuseumReward(); writeSave(); museum.refresh(); renderHotbar(); updateUI(); } // 보상 먼저 → 저장 → 현황판
+function openMuseumTank(t) { museumTank = t; renderMuseumTank(); openPanel(museumPanel); }
+function renderMuseumTank() {
+  const t = museumTank, f = t.f, R = RARITY[f.rarity], it = save.museum.fish[f.name];
+  const known = it || save.dex[f.name];
+  $('museumTitle').textContent = `${known ? f.name : '???'} 어항`;
+  const body = $('museumBody');
+  body.innerHTML = `<div class="count"><span style="color:${R.color}">${R.label}</span> · 어항 크기 ${t.len.toFixed(1)} x ${t.dep.toFixed(1)} x ${t.hgt.toFixed(1)}m (제일 큰 ${known ? f.name : '물고기'}도 실제 크기로 들어가요) · 기증 ${museumCount()} / ${museum.total}</div>`;
+  body.insertAdjacentHTML('beforeend', '<h3 class="chartH">전시 중</h3>');
+  if (it) body.appendChild(museumRow(it, [['꺼내기', () => { delete save.museum.fish[f.name]; save.inv.push(it); museumChanged(); renderMuseumTank(); }]]));
+  else body.insertAdjacentHTML('beforeend', '<div class="count">아직 비어 있어요. 이 물고기를 잡아서 기증해 주세요!</div>');
+  const mine = save.inv.filter((x) => x.name === f.name).sort((a, b) => b.weight - a.weight);
+  body.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 속 ${known ? esc(f.name) : '같은 물고기'} (${mine.length}마리)</h3>`);
+  if (!mine.length) body.insertAdjacentHTML('beforeend', '<div class="count">가방에 이 물고기가 없어요.</div>');
+  for (const x of mine) body.appendChild(museumRow(x, [[it ? '바꾸기' : '기증하기', () => { donateToMuseum(x); museumChanged(); renderMuseumTank(); }]]));
+}
+function openMuseumDesk() {
+  $('museumTitle').textContent = '노을 박물관 · 안내 데스크';
+  const body = $('museumBody'), n = museumCount();
+  // 가방에 있는데 아직 기증 안 한 종류 (종류마다 제일 무거운 것)
+  const best = {};
+  for (const it of save.inv) if (!save.museum.fish[it.name] && findFish(it.name) && (!best[it.name] || it.weight > best[it.name].weight)) best[it.name] = it;
+  const can = Object.values(best);
+  body.innerHTML = `<div class="count">기증한 물고기 <b>${n} / ${museum.total}</b>종 · ${save.museum.paid ? '완성 보상을 받았어요!' : `모든 어항을 채우면 <b>${money(MUSEUM_REWARD)}</b>`}</div>`;
+  const btn = document.createElement('button');
+  btn.className = 'actBtn'; btn.style.margin = '6px 0 10px';
+  btn.textContent = can.length ? `가방에서 새 물고기 ${can.length}종 한 번에 기증하기 (종류마다 제일 무거운 것)` : '지금 기증할 새 물고기가 없어요';
+  btn.disabled = !can.length;
+  btn.onclick = () => { for (const it of can) donateToMuseum(it); game.notice = `${can.length}종을 기증했어요! (${museumCount()} / ${museum.total})`; museumChanged(); openMuseumDesk(); }; // 다 채웠으면 보상 알림이 이 알림을 덮어써요
+  body.appendChild(btn);
+  // 구역별 현황
+  for (const H of museum.HALLS) {
+    const list = FISH.filter(H.test), got = list.filter((f) => save.museum.fish[f.name]).length;
+    const names = list.map((f) => save.museum.fish[f.name] ? `<span style="color:#9affb0">${esc(f.name)}</span>` : `<span style="color:#888">${save.dex[f.name] ? esc(f.name) : '???'}</span>`).join(', ');
+    body.insertAdjacentHTML('beforeend', `<h3 class="chartH">${H.name} ${got} / ${list.length}</h3><div class="count" style="line-height:1.7">${names}</div>`);
+  }
+  openPanel(museumPanel);
+}
+// =====================================================
+//  루비 신전 봉인: 정해진 물고기(이로치까지 맞아야 해요)를 2마리 바치면 풀려요 → 루비 공방에서 그 낚싯대를 팔아요
+// =====================================================
+let sealOpen = 0;
+function sealFits(it, S) { return it.name === S.fish && mutList(it.mut).some((m) => m.name === S.mut); }
+function openSeal(i) {
+  sealOpen = i;
+  const S = SEALS[i], have = save.ruby[S.id] || 0, done = have >= S.need;
+  $('museumTitle').textContent = `루비 신전 · ${S.name}`;
+  const body = $('museumBody');
+  body.innerHTML = `<div class="count">${done ? `<b style="color:#9affb0">봉인이 풀렸어요!</b> 루비 공방에서 <b>${esc(S.rod)}</b>을(를) 살 수 있어요.`
+    : `제단에 <b style="color:#ff8a9a">[${S.mut}] ${esc(S.fish)}</b>를 <b>${S.need}마리</b> 바치면 봉인이 풀려요. 지금 ${have} / ${S.need}마리.<br>이로치가 여러 개 겹친 물고기도 ${S.mut}가 섞여 있으면 돼요. 아주아주 드물어요!`}</div>`;
+  if (!done) {
+    const fit = save.inv.filter((it) => sealFits(it, S));
+    body.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 속 맞는 물고기 (${fit.length}마리)</h3>`);
+    if (!fit.length) body.insertAdjacentHTML('beforeend', '<div class="count">아직 없어요. 루비 바다 · 루비 호수에서 루비 낚싯대로 낚아 보세요.</div>');
+    for (const it of fit) body.appendChild(museumRow(it, [['바치기', () => {
+      if (game.selected === it.id) equip(null);
+      save.inv = save.inv.filter((x) => x !== it);
+      save.ruby[S.id] = Math.min(S.need, (save.ruby[S.id] || 0) + 1);
+      if (save.ruby[S.id] >= S.need) {
+        game.notice = `${S.name}이(가) 풀렸어요! 루비 공방에서 ${S.rod}을(를) 팔기 시작했어요.`;
+        tone(392, 0.3, 'triangle', 0.08); tone(587, 0.3, 'triangle', 0.08, 0.2); tone(784, 0.5, 'triangle', 0.08, 0.4);
+      }
+      ruby.setSeals(save);
+      writeSave(); renderHotbar(); updateUI(); openSeal(sealOpen);
+    }]]));
+  }
+  openPanel(museumPanel);
+}
+// 정기선: 화면이 까매졌다가 반대편 선착장으로
+function useFerry(to) {
+  if (game.inBoat) return;
+  if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
+  fadeMove(() => {
+    const at = to === 'ruby' ? ruby.arriveAt : { x: FERRY_HOME.x, z: FERRY_HOME.z - 2.5 };
+    person.position.set(at.x, groundY(at.x, at.z), at.z);
+    player.ry = to === 'ruby' ? Math.PI : 0; person.rotation.y = player.ry;
+    cam.yaw = player.ry;
+    game.notice = to === 'ruby' ? '루비 섬에 도착했어요! 루비 바다 · 루비 호수의 물고기는 루비 공방 낚싯대로만 낚여요.' : '모래사장 부두로 돌아왔어요.';
+    updateUI();
+  });
 }
 // 어항 속 물고기 모형 다시 만들기 (어항 크기에 맞게 줄여요)
 function rebuildTankFish(h) {
@@ -5398,7 +5815,7 @@ function rebuildTankFish(h) {
     if (!f) continue;
     const model = makeFishModel(f, it.mut, it.weight);
     const len = f.look.L * fishScale(f, it.weight);
-    model.scale.multiplyScalar(Math.min(1, 0.75 / Math.max(0.1, len))); // 어항에 쏙 들어가게
+    if (!it.big) model.scale.multiplyScalar(Math.min(1, 0.75 / Math.max(0.1, len))); // 작게: 어항에 쏙 들어가게 (원래 크기면 그대로, 삐져나와도 OK)
     scene.add(model);
     h.fish.push({ model, ph: Math.random() * 10, sp: 0.25 + Math.random() * 0.25, y: T.y + Math.random() * T.h, z: T.z + (Math.random() - 0.5) * T.d, flop: f.name === '물 만난 광어' });
   }
@@ -5415,8 +5832,8 @@ function updateIslandHud(now) {
   if (!show) { if (!el.classList.contains('hidden')) el.classList.add('hidden'); return; }
   const near = seaWorld.islands.map((it) => ({ it, d: Math.hypot(it.x - p.x, it.z - p.z) })).sort((a, b) => a.d - b.d);
   const on = near[0].d < near[0].it.r;
-  // 안내는 정글섬만 (집 섬들은 안내에서 빼요)
-  const parts = near.filter((n) => n.it.id === 'jungle' && n.d >= n.it.r).map(({ it, d }) => {
+  // 안내는 정글섬 · 루비 섬만 (집 섬들은 안내에서 빼요)
+  const parts = near.filter((n) => (n.it.id === 'jungle' || n.it.id === 'ruby') && n.d >= n.it.r).map(({ it, d }) => {
     // 카메라가 보는 쪽 기준으로 화살표 (↑ = 화면 앞쪽)
     let a = Math.atan2(-(it.x - p.x), -(it.z - p.z)) - cam.yaw;
     a = Math.atan2(Math.sin(a), Math.cos(a));
@@ -5428,13 +5845,17 @@ function updateIslandHud(now) {
   el.classList.remove('hidden');
 }
 function updateHouses(t) {
+  const inMuseum = game.room === museum.room;
+  if (inMuseum) rainLines.visible = false;
+  museum.update(t, inMuseum, roomCam.t);
   for (const h of seaWorld.houses) {
-    // 집 안에 들어가면 지붕을 숨겨서 안이 보여요
-    const inside = h.inside(person.position.x, person.position.z);
-    if (h.roofGroup.visible === inside) h.roofGroup.visible = !inside;
-    if (inside) rainLines.visible = false; // 집 안에는 비가 안 와요
-    // 벽난로: 켜져 있으면 불꽃이 일렁이고, 집 안에 있을 땐 주황 불빛도 비춰요
-    h.fire.visible = h.fireOn;
+    // 집 안(방)에 있으면: 비는 안 오고, 따뜻한 방 불빛을 켜요 (밤엔 조금 더 밝게)
+    const inside = game.room === h;
+    if (inside) rainLines.visible = false;
+    const lw = inside ? (isNight() ? 2.6 : 1.7) : 0;
+    for (const L of h.roomLights) if (L.intensity !== lw) L.intensity = lw;
+    // 벽난로 (벽난로 가구를 놓았을 때만): 켜져 있으면 불꽃이 일렁이고, 집 안에 있을 땐 주황 불빛도 비춰요
+    h.fire.visible = h.fireOn && !!h.fireAt;
     if (h.fireOn) h.fire.children.forEach((f, i) => { f.scale.set(1, 0.8 + Math.sin(t * 9 + i * 2) * 0.25, 1); });
     const want = h.fireOn && inside ? 3.5 + Math.sin(t * 7) * 0.6 : 0;
     if (h.fireLight.intensity !== want) h.fireLight.intensity = want;
@@ -5449,6 +5870,14 @@ function updateHouses(t) {
 }
 seaWorld.houses.forEach(syncHouse);
 watchHouses(onHouseOwners); // 집 주인 목록 지켜보기 (누가 어느 집 주인인지)
+// 힐링 생활 (가구점 · 집 꾸미기 · 채집 · 정원 · 반려동물 · 계절 · 친밀도 · 보상) — life.js
+const life = setupLife({
+  THREE, scene, save, writeSave, money, $, openPanel, closePanels, modalOpen, registerPanel: (el) => extraPanels.push(el),
+  get person() { return person; }, player, game, shops, colliders, seaWorld, makeShop, tone, sfx, updateUI, groundY, inLake, onIsland, onPlateau, isNight, esc, mat,
+  walkers, npcs, findFish, makeFishModel, fishScale, makeBlockPerson, softBuff, renderHotbar, cam, multi: () => multi,
+  getTod: () => tod, setTod: (v) => { tod = v; }, equip, isRaining, bobber, waterMat, camera, sayLine, campfire, waterY: LAKE.y
+});
+if (window.__game) window.__game.life = life; // 테스트용으로 들여다보기
 
 function updateShopBoats(t) {
   for (const b of shopBoats) { b.m.position.y = LAKE.y + Math.sin(t * 1.4 + b.ph) * 0.03; b.m.rotation.z = Math.sin(t * 1.1 + b.ph) * 0.03; }
@@ -5456,6 +5885,8 @@ function updateShopBoats(t) {
 }
 
 applyRod();
+museum.refresh(); // 박물관 이름판 · 기증한 물고기
+ruby.setSeals(save); // 루비 신전 봉인 (풀린 봉인은 불이 꺼져요)
 rebuildHero(save.outfit); // 저장해 둔 옷 입기
 renderHotbar();
 updateQuestHud();

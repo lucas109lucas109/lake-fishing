@@ -188,9 +188,10 @@ function leave(c) {
 const ANIMS = new Set(['idle', 'walk', 'charge', 'cast', 'wait', 'bite', 'reel', 'caught', 'swim', 'sit', 'hold']);
 function cleanState(s) {
   if (!s || typeof s !== 'object') return null;
-  const bob = Array.isArray(s.b) && s.b.length === 3 ? s.b.map((v) => num(v, -200, 200)) : null;
+  // 위치 범위: 루비 섬(남쪽 z 약 400)과 집 · 박물관 안쪽 방(북쪽 z -1100 쯤)까지 들어오게 넓혀요
+  const bob = Array.isArray(s.b) && s.b.length === 3 ? [num(s.b[0], -600, 600), num(s.b[1], -5, 30), num(s.b[2], -1200, 600)] : null;
   return {
-    x: num(s.x, -200, 200), y: num(s.y, -5, 30), z: num(s.z, -200, 200), r: num(s.r, -100, 100),
+    x: num(s.x, -600, 600), y: num(s.y, -5, 30), z: num(s.z, -1200, 600), r: num(s.r, -100, 100),
     a: ANIMS.has(s.a) ? s.a : 'idle', rod: Math.floor(num(s.rod, -1, 30)),
     f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 24) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob, bt: s.bt == null ? -1 : Math.floor(num(s.bt, -1, 15))
   };
@@ -236,6 +237,13 @@ function handle(c, msg) {
     // 탈의실에서 옷을 바꿨어요
     c.outfit = cleanOutfitMsg(msg.o);
     if (c.outfit) broadcast(c.room, { t: 'outfit', id: c.id, o: c.outfit }, c);
+  } else if (msg.t === 'fx') {
+    // 같이 노는 효과 (불꽃놀이 · 손 흔들기 · 하트 · 응원): 정해진 종류만, 너무 자주는 안 돼요
+    const FX = ['firework', 'wave', 'cheer', 'heart'];
+    const now = Date.now();
+    if (!FX.includes(msg.k) || now - (c.lastFx || 0) < 400) return;
+    c.lastFx = now;
+    broadcast(c.room, { t: 'fx', id: c.id, k: msg.k, x: num(msg.x, -500, 500), z: num(msg.z, -500, 500), c: Math.floor(num(msg.c, 0, 7)) }, c);
   } else if (msg.t === 'leave') {
     leave(c);
   }

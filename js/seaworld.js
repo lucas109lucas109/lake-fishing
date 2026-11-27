@@ -7,7 +7,7 @@
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // 한 덩어리 장식 묶음. add() 로 모양을 쌓고, build() 로 메시 하나를 만들어요
-class DecoBatch {
+export class DecoBatch {
   constructor(THREE, matOpts = {}) {
     this.THREE = THREE;
     this.cells = new Map(); // 구역(24칸)별로 따로 모아요 → 안 보이는 구역은 통째로 안 그려요
@@ -19,6 +19,7 @@ class DecoBatch {
   // geo: 모양, color: 색, p: [x,y,z], r: [rx,ry,rz], s: [sx,sy,sz]
   add(geo, color, p, r = [0, 0, 0], s = [1, 1, 1]) {
     const T = this.THREE;
+    if (this.built) { console.warn('[장식] 이미 덩어리로 만든 뒤에 블록을 넣었어요 (안 보여요!)', p); return this; }
     const g = (geo.index ? geo.toNonIndexed() : geo.clone());
     for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
     this.e.set(r[0], r[1], r[2]);
@@ -36,6 +37,7 @@ class DecoBatch {
   // 구역마다 메시 하나씩 만들어요. material 을 주면 그 재질을 써요. 첫 메시를 돌려줘요
   build(parent, { cast = true, recv = true, dynamic = false, material = null } = {}) {
     const T = this.THREE;
+    this.built = true;
     const mat = material || new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, ...this.matOpts });
     let first = null;
     for (const geos of this.cells.values()) {
@@ -271,6 +273,8 @@ export function buildSeaWorld(ctx) {
   //  2) 섬 두 개 + 큰 집 (사야 들어갈 수 있어요)
   // =====================================================
   const ISLAND_TOP = 0.25;
+  // 집 안 방들이 있는 곳: 맵 북쪽 아주 멀리 (카메라는 220칸까지만 보여서 밖에서는 절대 안 보여요)
+  const ROOM_X0 = -160, ROOM_GAP = 60, ROOM_Z = -420;
   const houses = [];
   const houseBlockers = []; // 카메라가 벽을 뚫지 않게
 
@@ -323,15 +327,14 @@ export function buildSeaWorld(ctx) {
     knob.position.set(DOOR * 0.35, 0, -0.08);
     door.add(knob);
     scene.add(door);
-    // 가구 자리
-    const sx = x0 + 1.6, sz = z - 0.4;            // 소파
-    const bx = x1 - 1.4, bz = z1 - 2.0;            // 침대
-    const bkx = x1 - 0.45, bkz = z0 + 1.6;         // 책장
-    const fx = x0 + 0.5, fz = z1 - 2.2;            // 벽난로
-    const dx = x + 1.8, dz = z - 0.2;              // 식탁 (넓은 집)
-    const px = x0 + 0.75, pz = z0 + 2.4;           // 피아노 (탑 저택·대저택)
-    const b2x = x1 - 1.4, b2z = z1 - 5.0;          // 두 번째 침대 (대저택)
-    const hasDining = big, hasPiano = kind === 'tower' || kind === 'grand', hasBed2 = huge;
+    // ----- 집 안 = 따로 떨어진 넓은 방 (모동숲처럼 문으로 들어가면 화면이 까매졌다가 방으로 와요) -----
+    //  방은 맵 북쪽 아주 먼 곳(카메라가 닿지 않는 곳)에 집마다 하나씩 있어요. 바깥 집보다 훨씬 넓어요.
+    const ri = houses.length;
+    const rw = Math.round(w * 1.55 * 2) / 2, rd = Math.round(d * 1.45 * 2) / 2;   // 방 크기 (바깥의 약 2.2배 넓이)
+    const rx = ROOM_X0 + ri * ROOM_GAP, rz = ROOM_Z;
+    const rx0 = rx - rw / 2, rx1 = rx + rw / 2, rz0 = rz - rd / 2, rz1 = rz + rd / 2;
+    const RH = Math.max(3.4, H * 0.85);                                          // 방 벽 높이
+    const RDOOR = 1.6;                                                           // 방 앞쪽 나가는 문 너비
 
     // ----- 디자인 색으로 짓기 -----
     const clear = (g) => { while (g.children.length) { const m = g.children[0]; g.remove(m); m.geometry.dispose(); if (m.material) m.material.dispose(); } };
@@ -433,84 +436,101 @@ export function buildSeaWorld(ctx) {
         roofB.add(BOX, S.column, [x, y0 + 5.1, z0 - 3.05], [0, 0, 0], [DOOR * 2 + 4.4, 0.1, 0.12]);
       } else if (kind !== 'beach') roofB.add(BOX, roof, [x, y0 + 3.1, z0 - 1.2], [-0.25, 0, 0], [DOOR + 2.8, 0.15, 2.4]);
       else roofB.add(BOX, roof, [x, y0 + 2.9, z0 - 1.4], [-0.12, 0, 0], [w + 1.0, 0.12, 2.8]); // 데크 차양
-      // 집 안 색이 바뀌는 것: 러그, 소파, 이불, 베개
-      soft.add(BOX, S.rug, [x, y0 + 0.11, z - 0.3], [0, 0, 0], [w * 0.45, 0.02, d * 0.35]);
-      soft.add(BOX, S.rug2, [x, y0 + 0.125, z - 0.3], [0, 0, 0], [w * 0.38, 0.02, d * 0.27]);
-      soft.add(BOX, S.sofa, [sx, y0 + 0.45, sz], [0, 0, 0], [1.0, 0.5, 2.4]);
-      soft.add(BOX, S.sofa, [sx - 0.45, y0 + 0.9, sz], [0, 0, 0], [0.25, 0.9, 2.4]);
-      for (const s of [-1, 1]) soft.add(BOX, S.sofa, [sx, y0 + 0.75, sz + s * 1.15], [0, 0, 0], [1.0, 0.5, 0.2]);
-      for (const [qx, qz] of hasBed2 ? [[bx, bz], [b2x, b2z]] : [[bx, bz]]) {
-        soft.add(BOX, S.blanket, [qx, y0 + 0.8, qz - 0.25], [0, 0, 0], [1.75, 0.1, 1.9]);
-        soft.add(BOX, S.rug2, [qx, y0 + 0.87, qz + 0.95], [0, 0, 0], [1.2, 0.18, 0.45]);
+      // 방(집 안): 디자인 색으로 벽지 · 아래 나무 판벽 · 걸레받이 · 천장 띠 · 러그
+      const paper = new THREE.Color(wall).lerp(new THREE.Color(0xffffff), 0.45).getHex();
+      const paper2 = new THREE.Color(wall).lerp(new THREE.Color(0xffffff), 0.25).getHex();
+      const RW = (ax, az, lw, ld) => { // 방 벽 한 면 (lw/ld 중 하나가 두께)
+        soft.add(BOX, paper, [ax, y0 + RH / 2, az], [0, 0, 0], [lw, RH, ld]);
+        const nx = lw < ld, ins = 0.02;
+        soft.add(BOX, trim, [ax + (nx ? (ax < rx ? ins : -ins) : 0), y0 + 0.55, az + (nx ? 0 : (az < rz ? ins : -ins))], [0, 0, 0], [nx ? T + 0.06 : lw - 0.1, 1.1, nx ? ld - 0.1 : T + 0.06]); // 판벽
+        soft.add(BOX, S.chimney, [ax + (nx ? (ax < rx ? 0.05 : -0.05) : 0), y0 + 0.13, az + (nx ? 0 : (az < rz ? 0.05 : -0.05))], [0, 0, 0], [nx ? T + 0.12 : lw - 0.1, 0.16, nx ? ld - 0.1 : T + 0.12]); // 걸레받이
+        soft.add(BOX, trim, [ax + (nx ? (ax < rx ? 0.05 : -0.05) : 0), y0 + RH - 0.08, az + (nx ? 0 : (az < rz ? 0.05 : -0.05))], [0, 0, 0], [nx ? T + 0.14 : lw, 0.16, nx ? ld : T + 0.14]); // 천장 띠
+        soft.add(BOX, trim, [ax + (nx ? (ax < rx ? 0.04 : -0.04) : 0), y0 + 1.13, az + (nx ? 0 : (az < rz ? 0.04 : -0.04))], [0, 0, 0], [nx ? T + 0.1 : lw - 0.1, 0.06, nx ? ld - 0.1 : T + 0.1]); // 판벽 위 몰딩
+      };
+      RW(rx, rz1, rw + T, T);           // 뒷벽
+      RW(rx0, rz, T, rd + T);           // 왼쪽 벽
+      RW(rx1, rz, T, rd + T);           // 오른쪽 벽
+      // 벽지 세로 줄무늬 (뒷벽 · 옆벽)
+      for (let k = -rw / 2 + 0.5; k < rw / 2; k += 0.5) soft.add(BOX, paper2, [rx + k, y0 + 2.2 + (RH - 3.4) / 2, rz1 - T / 2 - 0.012], [0, 0, 0], [0.12, RH - 1.35, 0.01]);
+      for (const sxw of [-1, 1]) for (let k = -rd / 2 + 0.5; k < rd / 2; k += 0.5) soft.add(BOX, paper2, [rx + sxw * (rw / 2 - T / 2 - 0.012), y0 + 2.2 + (RH - 3.4) / 2, rz + k], [0, 0, 0], [0.01, RH - 1.35, 0.12]);
+      // 앞쪽은 낮은 턱만 (카메라가 앞에서 방을 들여다봐요), 가운데는 나가는 문
+      const fside = (rw - RDOOR) / 2;
+      for (const sgn of [-1, 1]) {
+        soft.add(BOX, trim, [rx + sgn * (RDOOR / 2 + fside / 2), y0 + 0.3, rz0], [0, 0, 0], [fside + T, 0.6, T]);
+        soft.add(BOX, S.chimney, [rx + sgn * (RDOOR / 2 + fside / 2), y0 + 0.63, rz0], [0, 0, 0], [fside + T + 0.04, 0.08, T + 0.06]);
       }
-      if (hasDining) for (const [cx, cz] of [[dx - 1.1, dz], [dx + 1.1, dz]]) soft.add(BOX, S.sofa, [cx, y0 + 0.5, cz], [0, 0, 0], [0.5, 0.08, 0.5]); // 의자 방석
+      // 러그 (방 가운데)
+      soft.add(BOX, S.rug, [rx, y0 + 0.105, rz - rd * 0.08], [0, 0, 0], [rw * 0.36, 0.02, rd * 0.3]);
+      soft.add(BOX, S.rug2, [rx, y0 + 0.118, rz - rd * 0.08], [0, 0, 0], [rw * 0.3, 0.02, rd * 0.24]);
+      soft.add(BOX, S.rug, [rx, y0 + 0.13, rz - rd * 0.08], [0, 0, 0], [rw * 0.2, 0.02, rd * 0.14]);
+      // 문 앞 매트 (밟으면 밖으로 나가요)
+      soft.add(BOX, S.door, [rx, y0 + 0.11, rz0 + 0.55], [0, 0, 0], [RDOOR, 0.03, 0.8]);
+      soft.add(BOX, S.rug2, [rx, y0 + 0.125, rz0 + 0.55], [0, 0, 0], [RDOOR - 0.3, 0.02, 0.55]);
       walls.build(wallMesh);
       roofB.build(roofGroup);
       soft.build(styledIn);
       door.material.color.set(S.door);
     }
 
-    // ----- 집 안 (색이 안 바뀌는 것) -----
-    inside.add(BOX, 0xb88a5a, [x, y0 + 0.06, z], [0, 0, 0], [w - 0.2, 0.06, d - 0.2]);
-    for (let k = -w / 2 + 0.6; k < w / 2; k += 0.6) inside.add(BOX, 0xa87a4a, [x + k, y0 + 0.095, z], [0, 0, 0], [0.03, 0.01, d - 0.3]); // 마루 줄
-    shiny.add(BOX, 0xffd84a, [sx, y0 + 0.8, sz - 0.6], [0, 0, 0.3], [0.4, 0.4, 0.15]); // 쿠션
-    shiny.add(BOX, 0xff8ab0, [sx, y0 + 0.8, sz + 0.5], [0, 0, -0.2], [0.4, 0.4, 0.15]);
-    inside.add(BOX, 0x8a5a3a, [x - 0.6, y0 + 0.45, sz], [0, 0, 0], [1.4, 0.08, 1.0]);                // 탁자
-    for (const [ax, az] of [[-0.6, -0.4], [0.6, -0.4], [-0.6, 0.4], [0.6, 0.4]]) inside.add(BOX, 0x6a4028, [x - 0.6 + ax, y0 + 0.25, sz + az], [0, 0, 0], [0.08, 0.4, 0.08]);
-    shiny.add(CYL, 0xf4f4f4, [x - 0.8, y0 + 0.55, sz], [0, 0, 0], [0.18, 0.12, 0.18]);                // 찻잔
-    inside.add(BOX, 0x7a4a2a, [bkx, y0 + 1.3, bkz], [0, 0, 0], [0.5, 2.5, 1.8]);                    // 책장
-    for (let r = 0; r < 4; r++) for (let k = 0; k < 7; k++) shiny.add(BOX, pick([0xd84a4a, 0x4a8ad8, 0x4ab86a, 0xe8c040, 0x9a5ad8, 0xf4f0e8]), [bkx - 0.05, y0 + 0.45 + r * 0.58, bkz - 0.7 + k * 0.22], [0, 0, 0], [0.3, 0.36 + rnd() * 0.1, 0.16]);
-    for (const [qx, qz] of hasBed2 ? [[bx, bz], [b2x, b2z]] : [[bx, bz]]) {                           // 침대 틀
-      inside.add(BOX, 0x8a5a3a, [qx, y0 + 0.35, qz], [0, 0, 0], [1.8, 0.5, 2.6]);
-      inside.add(BOX, 0xf4f4f4, [qx, y0 + 0.65, qz], [0, 0, 0], [1.7, 0.2, 2.5]);
-      inside.add(BOX, 0x8a5a3a, [qx, y0 + 0.9, qz + 1.3], [0, 0, 0], [1.8, 1.2, 0.12]);
+    // ----- 방 안 (색이 안 바뀌는 것): 마루 · 창문 · 천장 조명 · 어항 -----
+    // 방 둘레는 까맣게 (방 밖의 하늘·바다가 안 보이게) — 그림자는 안 만들어요
+    const voidBox = new THREE.Mesh(new THREE.BoxGeometry(rw + 60, 40, rd + 60), new THREE.MeshBasicMaterial({ color: 0x07060c, side: THREE.BackSide, fog: false }));
+    voidBox.position.set(rx, y0 + 6, rz - 6);
+    voidBox.userData.dynamic = true;
+    scene.add(voidBox);
+    inside.add(BOX, 0x6a5a4a, [rx, y0 - 0.1, rz], [0, 0, 0], [rw + 1.2, 0.3, rd + 1.2]);                   // 바닥 받침
+    inside.add(BOX, 0xb88a5a, [rx, y0 + 0.06, rz], [0, 0, 0], [rw - 0.05, 0.06, rd - 0.05]);               // 마루
+    for (let k = -rw / 2 + 0.6; k < rw / 2; k += 0.6) inside.add(BOX, 0xa87a4a, [rx + k, y0 + 0.095, rz], [0, 0, 0], [0.03, 0.01, rd - 0.3]); // 마루 줄
+    for (let k = -rd / 2 + 1.2; k < rd / 2; k += 2.4) for (let m = -rw / 2 + 0.3 + ((k * 7) % 1.2 + 1.2) % 1.2; m < rw / 2 - 0.3; m += 2.4) inside.add(BOX, 0xa87a4a, [rx + m, y0 + 0.095, rz + k], [0, 0, 0], [0.57, 0.01, 0.03]); // 마루 이음매
+    // 뒷벽 창문 (밖이 노을빛으로 보여요) + 커튼
+    const RWIN = [];
+    for (let t = -rw / 2 + 2.2; t <= rw / 2 - 2.0; t += 4.2) RWIN.push(t);
+    for (const t of RWIN) {
+      glow.add(BOX, 0xffd8a8, [rx + t, y0 + 2.0, rz1 - T / 2 - 0.02], [0, 0, 0], [1.3, 1.2, 0.02]);
+      inside.add(BOX, 0xf4f0e8, [rx + t, y0 + 2.0, rz1 - T / 2 - 0.04], [0, 0, 0], [0.06, 1.2, 0.02]);
+      inside.add(BOX, 0xf4f0e8, [rx + t, y0 + 2.0, rz1 - T / 2 - 0.04], [0, 0, 0], [1.3, 0.06, 0.02]);
+      for (const sg of [-1, 1]) inside.add(BOX, 0xf4f0e8, [rx + t + sg * 0.68, y0 + 2.0, rz1 - T / 2 - 0.05], [0, 0, 0], [0.08, 1.36, 0.06]);
+      for (const sg of [-1, 1]) inside.add(BOX, 0xf4f0e8, [rx + t, y0 + 2.0 + sg * 0.64, rz1 - T / 2 - 0.05], [0, 0, 0], [1.44, 0.08, 0.06]);
+      inside.add(BOX, 0xd8c8a8, [rx + t, y0 + 1.36, rz1 - T / 2 - 0.12], [0, 0, 0], [1.5, 0.06, 0.2]);       // 창턱
+      for (const sg of [-1, 1]) inside.add(BOX, 0xe8a0a0, [rx + t + sg * 0.88, y0 + 1.95, rz1 - T / 2 - 0.1], [0, 0, 0], [0.32, 1.6, 0.06]); // 커튼
+      inside.add(BOX, 0x8a6a4a, [rx + t, y0 + 2.8, rz1 - T / 2 - 0.12], [0, 0, 0], [2.3, 0.05, 0.05]);         // 커튼봉
+      shiny.add(CYL, 0xc86a4a, [rx + t + 0.45, y0 + 1.47, rz1 - T / 2 - 0.13], [0, 0, 0], [0.13, 0.16, 0.13]); // 창턱 화분
+      shiny.add(BALL, pick(FLOWER_COLORS), [rx + t + 0.45, y0 + 1.62, rz1 - T / 2 - 0.13], [0, 0, 0], [0.16, 0.16, 0.16]);
     }
-    inside.add(BOX, 0x9a8a7a, [fx, y0 + 0.9, fz], [0, 0, 0], [0.7, 1.8, 1.8]);                       // 벽난로
-    inside.add(BOX, 0x2a2420, [fx + 0.15, y0 + 0.55, fz], [0, 0, 0], [0.42, 0.8, 1.0]);              // 불 구멍 (불빛과 면이 안 겹치게 살짝 뒤로)
-    inside.add(BOX, 0x7a6a5a, [fx + 0.1, y0 + 1.85, fz], [0, 0, 0], [0.9, 0.15, 2.0]);
-    for (let k = 0; k < 3; k++) inside.add(CYL, 0x5a3a22, [fx + 0.3, y0 + 0.22, fz - 0.25 + k * 0.25], [Math.PI / 2, 0, 0], [0.12, 0.6, 0.12]); // 장작
-    // 불: 집마다 따로 만들어서 켜고 끌 수 있어요 (일렁일렁)
+    // 옆벽 작은 창
+    for (const sg of [-1, 1]) for (let t = -rd / 2 + 2.4; t <= rd / 2 - 2.4; t += 4.6) {
+      const wx = rx + sg * (rw / 2 - T / 2 - 0.02);
+      glow.add(BOX, 0xffd8a8, [wx, y0 + 2.0, rz + t], [0, 0, 0], [0.02, 1.0, 1.0]);
+      for (const k of [-1, 1]) inside.add(BOX, 0xf4f0e8, [wx - sg * 0.03, y0 + 2.0 + k * 0.53, rz + t], [0, 0, 0], [0.06, 0.07, 1.12]);
+      for (const k of [-1, 1]) inside.add(BOX, 0xf4f0e8, [wx - sg * 0.03, y0 + 2.0, rz + t + k * 0.53], [0, 0, 0], [0.06, 1.12, 0.07]);
+      inside.add(BOX, 0xf4f0e8, [wx - sg * 0.03, y0 + 2.0, rz + t], [0, 0, 0], [0.04, 1.0, 0.05]);
+    }
+    // 방 불빛: 따뜻한 등 두 개 (방 안에 있을 때만 켜요 — main.js updateHouses)
+    const roomLights = [];
+    for (const lx of rw > 16 ? [-rw / 4, rw / 4] : [0]) {
+      const L = new THREE.PointLight(0xffe2b8, 0, Math.max(rw, rd) * 1.3, 1.2);
+      L.position.set(rx + lx, y0 + RH + 0.6, rz - 0.5);
+      scene.add(L); roomLights.push(L);
+    }
+    // 벽난로 불 (벽난로 가구를 놓은 자리로 옮겨 가요 — life.js)
     const fireMat = new THREE.MeshStandardMaterial({ color: 0xffb04a, emissive: 0xff7a1a, emissiveIntensity: 1.6, roughness: 0.6 });
-    const fire = new THREE.Group(); fire.userData.dynamic = true;
-    for (let k = 0; k < 3; k++) { const f = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.45, 5), fireMat); f.position.set(fx + 0.32, y0 + 0.45, fz - 0.25 + k * 0.25); fire.add(f); }
+    const fire = new THREE.Group(); fire.userData.dynamic = true; fire.visible = false;
+    for (let k = 0; k < 3; k++) { const f = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.38, 5), fireMat); f.position.set(-0.2 + k * 0.2, 0.32, -0.05); fire.add(f); }
     scene.add(fire);
-    const fireLight = new THREE.PointLight(0xff8a3a, 0, 6, 2); // 처음엔 꺼 두고, 내 집 안에 있을 때만 켜요 (가벼우려고)
-    fireLight.position.set(fx + 0.8, y0 + 0.8, fz);
-    scene.add(fireLight);
-    const plants = [[x0 + 0.6, z0 + 0.6], [x1 - 0.6, z0 + 0.6]];
-    if (!hasPiano) plants.push([x0 + 0.6, z - 1.8]);
-    for (const [qx, qz] of plants) {                                                                   // 화분
-      inside.add(CYL, 0xc86a4a, [qx, y0 + 0.3, qz], [0, 0, 0], [0.5, 0.5, 0.5]);
-      for (let k = 0; k < 4; k++) inside.add(BALL, pick([0x4f8a3e, 0x5a9a48]), [qx + (rnd() - 0.5) * 0.4, y0 + 0.75 + rnd() * 0.4, qz + (rnd() - 0.5) * 0.4], [0, 0, 0], [0.5, 0.5, 0.5]);
-    }
-    for (const [gz, col] of [[z - 0.5, 0xff9a6a], [z + 1.6, 0x6ab8e8]]) {                             // 그림 액자
-      inside.add(BOX, 0xd8b040, [x0 + 0.16, y0 + 2.4, gz], [0, 0, 0], [0.06, 1.0, 1.3]);
-      shiny.add(BOX, col, [x0 + 0.2, y0 + 2.4, gz], [0, 0, 0], [0.04, 0.8, 1.1]);
-    }
-    if (hasDining) {                                                                                   // 식탁 + 의자 2개 + 꽃병
-      inside.add(BOX, 0x9a6a3a, [dx, y0 + 0.75, dz], [0, 0, 0], [1.4, 0.08, 1.0]);
-      for (const [ax, az] of [[-0.6, -0.4], [0.6, -0.4], [-0.6, 0.4], [0.6, 0.4]]) inside.add(BOX, 0x7a4a24, [dx + ax, y0 + 0.4, dz + az], [0, 0, 0], [0.08, 0.7, 0.08]);
-      for (const s of [-1, 1]) { inside.add(BOX, 0x7a4a24, [dx + s * 1.1, y0 + 0.45, dz], [0, 0, 0], [0.5, 0.08, 0.5]); inside.add(BOX, 0x7a4a24, [dx + s * 1.33, y0 + 0.8, dz], [0, 0, 0], [0.06, 0.7, 0.5]); for (const [ax, az] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) inside.add(BOX, 0x7a4a24, [dx + s * 1.1 + ax, y0 + 0.22, dz + az], [0, 0, 0], [0.06, 0.42, 0.06]); }
-      shiny.add(CYL, 0x5ab8e8, [dx, y0 + 0.92, dz], [0, 0, 0], [0.18, 0.28, 0.18]);
-      for (let k = 0; k < 3; k++) shiny.add(BALL, pick(FLOWER_COLORS), [dx + (k - 1) * 0.08, y0 + 1.12, dz], [0, 0, 0], [0.12, 0.12, 0.12]);
-    }
-    if (hasPiano) {                                                                                    // 피아노
-      inside.add(BOX, 0x1a1a1e, [px, y0 + 0.65, pz], [0, 0, 0], [0.7, 1.3, 1.8]);
-      inside.add(BOX, 0xf8f8f8, [px + 0.45, y0 + 0.82, pz], [0, 0, 0], [0.3, 0.05, 1.6]);
-      for (let k = 0; k < 7; k++) inside.add(BOX, 0x1a1a1e, [px + 0.4, y0 + 0.86, pz - 0.65 + k * 0.22], [0, 0, 0], [0.18, 0.04, 0.08]);
-      inside.add(BOX, 0x2a2a30, [px + 1.0, y0 + 0.45, pz], [0, 0, 0], [0.4, 0.06, 0.9]);
-    }
-    // ----- 어항: 뒷벽에 커다랗게 -----
+    const fireLight = new THREE.PointLight(0xff8a3a, 0, 6, 2);
+    fireLight.position.set(0, 0.6, -0.6); fire.add(fireLight);
+    // ----- 어항: 뒷벽에 커다랗게 (방 안) -----
     const tw = tankW, th = 1.7, td = 1.2;
-    const tx = x - 0.5, tz = z1 - 0.95, ty = y0 + 0.95; // 어항 바닥 높이
+    const tx = rx - 0.5, tz = rz1 - 0.95, ty = y0 + 0.95; // 어항 바닥 높이
     inside.add(BOX, 0x5a3a24, [tx, y0 + 0.47, tz], [0, 0, 0], [tw + 0.3, 0.9, td + 0.2]);   // 받침장
     inside.add(BOX, 0xd8b040, [tx, y0 + 0.92, tz - td / 2 - 0.13], [0, 0, 0], [tw + 0.3, 0.06, 0.04]);
+    for (let k = 0; k < Math.max(2, Math.round(tw / 1.4)); k++) { const n = Math.max(2, Math.round(tw / 1.4)), dx2 = tx - tw / 2 + (k + 0.5) * tw / n; inside.add(BOX, 0x6a4a30, [dx2, y0 + 0.47, tz - td / 2 - 0.11], [0, 0, 0], [tw / n - 0.12, 0.7, 0.02]); shiny.add(BOX, 0xd8b040, [dx2, y0 + 0.5, tz - td / 2 - 0.13], [0, 0, 0], [0.12, 0.04, 0.03]); } // 받침장 문 + 손잡이
     inside.add(BOX, 0xe8d4a4, [tx, ty + 0.08, tz], [0, 0, 0], [tw - 0.04, 0.16, td - 0.04]);               // 모래 바닥
     for (let k = 0; k < Math.round(tw * 2); k++) { // 수초
       const kx = tx - tw / 2 + 0.2 + rnd() * (tw - 0.4), kz = tz - td / 2 + 0.2 + rnd() * (td - 0.3), kh = 0.4 + rnd() * 0.8;
       shiny.add(BOX, pick([0x3aa85a, 0x4ac86a, 0x2a8a4a]), [kx, ty + 0.16 + kh / 2, kz], [0, rnd() * 3, (rnd() - 0.5) * 0.3], [0.06, kh, 0.14]);
     }
-    for (let k = 0; k < Math.round(tw); k++) { const s = 0.25 + rnd() * 0.25; shiny.add(ROCK, pick([0xb0a898, 0x8a8478, 0xff9a8a]), [tx - tw / 2 + 0.3 + rnd() * (tw - 0.6), ty + 0.2, tz - td / 2 + 0.3 + rnd() * (td - 0.5)], [rnd(), rnd(), rnd()], [s, s * 0.7, s]); }
+    for (let k = 0; k < Math.round(tw); k++) { const sc = 0.25 + rnd() * 0.25; shiny.add(ROCK, pick([0xb0a898, 0x8a8478, 0xff9a8a]), [tx - tw / 2 + 0.3 + rnd() * (tw - 0.6), ty + 0.2, tz - td / 2 + 0.3 + rnd() * (td - 0.5)], [rnd(), rnd(), rnd()], [sc, sc * 0.7, sc]); }
     shiny.add(CONE, 0xff7ab0, [tx + tw / 2 - 0.5, ty + 0.4, tz], [0, 0, 0], [0.3, 0.5, 0.3]); // 분홍 산호
     const waterBox = new THREE.Mesh(new THREE.BoxGeometry(tw - 0.06, th - 0.18, td - 0.06),
       new THREE.MeshStandardMaterial({ color: 0x5ac8e8, transparent: true, opacity: 0.22, roughness: 0.1, emissive: 0x1a6a8a, emissiveIntensity: 0.25, depthWrite: false }));
@@ -530,43 +550,40 @@ export function buildSeaWorld(ctx) {
       const L = Math.hypot(bx2 - ax, bz2 - az), n = Math.ceil(L / 0.45);
       for (let i = 0; i <= n; i++) { const c = { x: ax + (bx2 - ax) * i / n, z: az + (bz2 - az) * i / n, r: 0.32 }; colliders.push(c); if (out) out.push(c); }
     };
+    // 바깥 집: 벽 + 문 (문은 늘 닫혀 있어요. 내 집이면 문에 다가가면 방으로 들어가요)
     line(x0, z1, x1, z1); line(x0, z0, x0, z1); line(x1, z0, x1, z1);
     line(x0, z0, x - DOOR / 2 - 0.05, z0); line(x + DOOR / 2 + 0.05, z0, x1, z0);
-    line(tx - tw / 2, tz - td / 2 + 0.1, tx + tw / 2, tz - td / 2 + 0.1); // 어항 앞
     const doorCol = [];
-    line(x - DOOR / 2, z0, x + DOOR / 2, z0, doorCol); // 잠긴 문
-    colliders.push({ x: sx, z: sz, r: 0.9 }, { x: bx, z: bz, r: 1.1 }, { x: bx, z: bz + 0.9, r: 0.9 }, { x: bkx, z: bkz, r: 0.6 }, { x: fx, z: fz, r: 0.8 });
-    if (hasBed2) colliders.push({ x: b2x, z: b2z, r: 1.1 }, { x: b2x, z: b2z + 0.9, r: 0.9 });
-    if (hasDining) colliders.push({ x: dx, z: dz, r: 0.75 });
-    if (hasPiano) colliders.push({ x: px, z: pz - 0.5, r: 0.55 }, { x: px, z: pz + 0.5, r: 0.55 });
+    line(x - DOOR / 2, z0, x + DOOR / 2, z0, doorCol);
     if (kind === 'tower') addCollider(tX, tZ, TR + 0.1);
-
-    // 가구 상호작용 자리: 그 앞에 가서 E (내 집 안에서만)
-    //  seat = 앉을 자리 {x, y, z, ry(바라보는 쪽)}, stand = 일어날 자리
-    const furn = [
-      { type: 'sofa', title: '소파 · 앉기', at: [sx + 1.25, sz], seat: { x: sx + 0.05, y: y0 + 0.1, z: sz, ry: -Math.PI / 2 }, stand: [sx + 1.2, sz] },
-      { type: 'bed', title: '침대 · 자기 (아침까지)', at: [bx - 1.35, bz] },
-      { type: 'fire', title: '벽난로 · 불 켜기/끄기', at: [fx + 1.3, fz] },
-      { type: 'book', title: '책장 · 책 읽기', at: [bkx - 1.1, bkz] }
-    ];
-    if (hasBed2) furn.push({ type: 'bed', title: '침대 · 자기 (아침까지)', at: [b2x - 1.35, b2z] });
-    if (hasDining) furn.push({ type: 'tea', title: '식탁 · 차 마시기', at: [dx, dz - 1.15], seat: { x: dx - 1.1, y: y0 + 0.15, z: dz, ry: -Math.PI / 2 }, stand: [dx - 1.1, dz - 1.0] });
-    if (hasPiano) furn.push({ type: 'piano', title: '피아노 · 연주하기', at: [px + 1.25, pz], seat: { x: px + 1.0, y: y0 + 0.1, z: pz, ry: -Math.PI / 2 }, stand: [px + 1.5, pz - 0.6] });
+    // 방: 벽 + 앞 턱 (가운데 문 자리는 비워서 매트까지 걸어갈 수 있어요) + 어항 앞
+    line(rx0, rz1, rx1, rz1); line(rx0, rz0, rx0, rz1); line(rx1, rz0, rx1, rz1);
+    line(rx0, rz0, rx - RDOOR / 2 - 0.1, rz0); line(rx + RDOOR / 2 + 0.1, rz0, rx1, rz0);
+    line(rx - RDOOR / 2, rz0 - 0.35, rx + RDOOR / 2, rz0 - 0.35);
+    line(tx - tw / 2, tz - td / 2 + 0.1, tx + tw / 2, tz - td / 2 + 0.1);
 
     const h = {
-      id, name, price, door, doorCol, roofGroup, x, z, x0, x1, z0, z1, open: false, kind, w, d,
-      defaultStyle: defStyle, style: -1, fire, fireLight, fireOn: true,
+      id, name, price, door, doorCol, roofGroup, open: false, kind, w, d,
+      // x·z·x0…z1 = 방(집 안) 기준. 가구 자리(save.decor)는 방 한가운데에서 얼마나 떨어졌는지로 저장해요
+      x: rx, z: rz, x0: rx0, x1: rx1, z0: rz0, z1: rz1, rw, rd, floorY: y0 + 0.09,
+      // 바깥 집 (섬 위)
+      ext: { x, z, x0, x1, z0, z1, doorX: x, doorZ: z0 },
+      defaultStyle: defStyle, style: -1, fire, fireLight, fireOn: true, roomLights,
       // 디자인 바꾸기 (같은 디자인이면 그대로)
       setStyle(i) { const k = HOUSE_STYLES[i] ? i : defStyle; if (k === this.style) return; this.style = k; paint(HOUSE_STYLES[k]); },
       tank: { x: tx, y: ty + 0.2, z: tz, w: tw - 0.5, h: th - 0.6, d: td - 0.45 }, fish: [],
-      inside: (qx, qz) => qx > x0 && qx < x1 && qz > z0 - 0.1 && qz < z1
+      inside: (qx, qz) => qx > rx0 && qx < rx1 && qz > rz0 - 0.6 && qz < rz1,
+      // 방 안 매트 = 나가는 곳 · 방에 들어오면 서는 곳
+      exitAt: { x: rx, z: rz0 + 0.35 }, enterAt: { x: rx, z: rz0 + 1.7 },
+      bigKinds: { dining: big, piano: kind === 'tower' || kind === 'grand', bed2: huge }
     };
     h.setStyle(defStyle);
     houses.push(h);
-    // 문 앞 (사기 / 들어가기 / 디자인) · 어항 앞 (물고기 넣고 빼기) · 가구들
+    // 문 앞 (사기 / 들어가기 / 디자인) · 어항 앞 (물고기 넣고 빼기)
     shops.push({ kind: 'house', house: h, title: `${name} · ${'$' + price.toLocaleString('en-US')}`, group: wallMesh, pos: new THREE.Vector3(x, y0, z0 - 1.6), promptAt: new THREE.Vector3(x, y0 + 3.6, z0 - 1.2) });
+    // 방 안 문 옆: 집 관리 (가구 배치 · 디자인)
+    shops.push({ kind: 'house', house: h, roomEntry: true, title: '집 관리 · 가구 배치 · 디자인 (E)', group: wallMesh, pos: new THREE.Vector3(rx + RDOOR / 2 + 1.0, y0, rz0 + 1.0), promptAt: new THREE.Vector3(rx + RDOOR / 2 + 1.0, y0 + 2.2, rz0 + 0.8), r: 1.1 });
     shops.push({ kind: 'tank', house: h, title: '어항 · 물고기 전시하기', group: wallMesh, pos: new THREE.Vector3(tx, y0, tz - td / 2 - 1.0), promptAt: new THREE.Vector3(tx, ty + th + 0.6, tz - td / 2) });
-    for (const f of furn) shops.push({ kind: 'furn', house: h, furn: f, title: f.title, group: wallMesh, pos: new THREE.Vector3(f.at[0], y0, f.at[1]), promptAt: new THREE.Vector3(f.at[0], y0 + 2.4, f.at[1]) });
     // 정원: 하얀 울타리 + 꽃밭 + 우체통 + 돌길
     const front = kind === 'beach' ? 4.4 : 3.4;
     const gx0 = x0 - 2.2, gx1 = x1 + 2.2, gz0 = z0 - front, gz1 = z1 + 1.8;
@@ -1006,6 +1023,10 @@ export function buildSeaWorld(ctx) {
     addCollider(sx - 1.5, sz, 0.25); addCollider(sx + 1.5, sz, 0.25);
   }
 
+  // 상호작용 물건 모양 만들기 — 꼭 덩어리로 만들기(build) "전에" 해야 기둥·몸체가 들어가요
+  // (예전엔 뒤에 해서 그네·해먹·망원경·상자·징의 몸체가 빠지고 줄·의자만 떠 있었어요)
+  for (const t of things) makeThingModel(t);
+
   // 다 만들었으면 덩어리로 만들어요
   deco.build(scene);
   shiny.build(scene);
@@ -1013,7 +1034,7 @@ export function buildSeaWorld(ctx) {
   tinyShiny.build(scene, { cast: false });
   glow.build(scene, { cast: false, material: glowMat }); // 창문·등불은 빛나는 재질로
 
-  // 상호작용 물건 모양 만들기
-  for (const t of things) makeThingModel(t);
-  return { houses, houseBlockers, zEdge, islands: islandInfo, things, jungleFx, trunks };
+  // 방 안인지 (main.js 가 걷기·바닥 높이에 써요)
+  const inRoom = (qx, qz) => qz < -300 && houses.some((h) => qx > h.x0 - 0.2 && qx < h.x1 + 0.2 && qz > h.z0 - 1.2 && qz < h.z1 + 0.2);
+  return { houses, houseBlockers, zEdge, islands: islandInfo, things, jungleFx, trunks, inRoom };
 }

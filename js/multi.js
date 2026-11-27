@@ -17,6 +17,7 @@ export const PLAYER_LOOKS = [
 export function setupMulti(ctx) {
   const { THREE, scene, makeBlockPerson, buildRod, placeSpin, RODS, ROD_LEN, makeBobber, cordMat, makeNameTag,
     makeFishModel, findFish, fishScale, getMyState, onFeed, onStatus, outfitToLook, makeBoatModel, getOutfit } = ctx;
+  // ctx.onFx(보낸 사람, 메시지): 불꽃놀이 같은 같이 노는 효과를 받았을 때 (main.js → life.js 의 coop.js)
 
   let ws = null;
   let myId = null, room = null, maxPlayers = 5, opened = false, wanted = false;
@@ -96,6 +97,9 @@ export function setupMulti(ctx) {
     } else if (m.t === 'outfit') {
       const r = remotes.get(m.id);
       if (r && m.o) dressRemote(r, m.o);
+    } else if (m.t === 'fx') {
+      const r = remotes.get(m.id);
+      if (r && ctx.onFx) ctx.onFx({ name: r.name, group: r.group }, m);
     } else if (m.t === 'catch') {
       const r = remotes.get(m.id);
       const f = findFish(m.f);
@@ -287,12 +291,17 @@ export function setupMulti(ctx) {
     if (opened && room && ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'catch', f: item.name, m: item.mut || null, w: item.weight }));
   }
 
+  function sendFx(k, x, z, c = 0) {
+    if (opened && room && ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'fx', k, x, z, c }));
+  }
+
   function sendOutfit(o) {
     if (opened && room && ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'outfit', o }));
   }
 
   return {
-    connect, disconnect, update, sendCatch, sendOutfit,
+    connect, disconnect, update, sendCatch, sendOutfit, sendFx,
+    positions: () => [...remotes.values()].map((r) => ({ name: r.name, x: r.s.x, y: r.s.y, z: r.s.z, a: r.s.a, b: r.s.b })),
     get connected() { return opened && !!room; },
     get room() { return room; },
     players: () => [...remotes.values()].map((r) => ({ name: r.name, n: r.s.n }))

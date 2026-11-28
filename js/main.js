@@ -10,7 +10,7 @@ import { startStaticMerge, compactRig } from './optimize.js';
 import { fixCoplanar } from './zfix.js';
 import { buildSeaWorld, HOUSE_STYLES, DecoBatch } from './seaworld.js';
 import { buildMuseum, cleanMuseum, MUSEUM_REWARD } from './museum.js';
-import { buildRuby, rubyHeight, templeGround, RUBY, RUBY_SEA, RUBY_STRAIT, RUBY_LAGOON, SEALS, DOCK as RUBY_DOCK } from './ruby.js';
+import { buildRuby, rubyHeight, templeGround, RUBY, RUBY_SEA, RUBY_STRAIT, RUBY_LAGOON, SEALS, RUBY_BOSS, DOCK as RUBY_DOCK } from './ruby.js';
 import { buildRubyRod } from './rubyrods.js';
 import { fmtMoney } from './money.js';
 import { buildShrine, SHRINE_POOL } from './shrine.js';
@@ -1345,31 +1345,32 @@ const RODS = [
   { name: '정글 왕의 낚싯대', shop: 'jungle', price: 60000000, luck: 0.86, reel: 2.4, bite: 0.2, zone: 0.2, perk: '특기: 게이지·입질이 빨라요 (정글 공방에서 제일!)',
     color: 0x3a2a14, color2: 0xc8862a, grip: 0x1a0a04, accent: 0xffe23a, reelC: 0x0a2a1a, rings: 0, metal: 0.3, rough: 0.4, glow: 0xffa83a, tip: 'none', orbit: 10, style: 'king' },
   // ---- 루비 섬 루비 공방에서만 팔아요 (shop: 'ruby') — 루비 바다 · 루비 호수는 이 낚싯대로만 낚여요 ----
-  //  가장 비싼 2개(seal)는 루비 신전의 봉인을 풀어야 살 수 있어요 (ruby.js SEALS) · 모양은 rubyrods.js
-  { name: '루비 낚싯대', shop: 'ruby', price: 200000000, luck: 1.05, reel: 2.2, bite: 0.24, zone: 0.22, perk: '특기: 루비 물고기를 낚을 수 있는 첫 낚싯대 · 홍옥이 나선으로 박혀 있어요',
+  //  가장 비싼 2개(shop: 'shrine')는 공방이 아니라 루비 신전 성소 안에서 팔아요: 봉인 2개 풀기 → 성소 보스(한 마리) 낚기 → 성소 제단 앞 낚싯대에서 E
+  //  bossZone = 보스전 초록 칸 크기 (낚싯대마다 달라요) · 모양은 rubyrods.js
+  { name: '루비 낚싯대', shop: 'ruby', bossZone: 0.26, price: 200000000, luck: 1.05, reel: 2.2, bite: 0.24, zone: 0.22, perk: '특기: 루비 물고기를 낚을 수 있는 첫 낚싯대 · 홍옥이 나선으로 박혀 있어요',
     color: 0x8a0a1a, color2: 0xd8203a, grip: 0x2a0a0e, accent: 0xd8b040, reelC: 0x3a0a12, rings: 0, metal: 0.5, rough: 0.25, glow: 0xff2a4a, tip: 'none', orbit: 4, style: 'ruby1' },
-  { name: '석류석 낚싯대', shop: 'ruby', price: 300000000, luck: 1.12, reel: 2.3, bite: 0.22, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (덩굴 낚싯대와 같아요!) · 석류석 수정이 자라나요',
+  { name: '석류석 낚싯대', shop: 'ruby', bossZone: 0.34, price: 300000000, luck: 1.12, reel: 2.3, bite: 0.22, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (덩굴 낚싯대와 같아요!) · 석류석 수정이 자라나요',
     color: 0x3a0a14, color2: 0x8a1a2a, grip: 0x1a0608, accent: 0xff6a7a, reelC: 0x2a0a10, rings: 0, metal: 0.3, rough: 0.35, glow: 0xff4a6a, tip: 'none', orbit: 5, style: 'ruby2' },
-  { name: '진홍 용비늘 낚싯대', shop: 'ruby', price: 1350000000, luck: 1.2, reel: 2.55, bite: 0.19, zone: 0.22, perk: '특기: 게이지가 엄청 빨라요 · 홍옥 바다용의 비늘을 겹겹이',
+  { name: '진홍 용비늘 낚싯대', shop: 'ruby', bossZone: 0.30, price: 1350000000, luck: 1.2, reel: 2.55, bite: 0.19, zone: 0.22, perk: '특기: 게이지가 엄청 빨라요 · 홍옥 바다용의 비늘을 겹겹이',
     color: 0x5a0a14, color2: 0xb8182a, grip: 0x1a0a08, accent: 0xffc83a, reelC: 0x2a0a0e, rings: 0, metal: 0.45, rough: 0.3, glow: 0xff3a2a, tip: 'none', orbit: 0, style: 'ruby3' },
-  { name: '루비 신전의 홍염 낚싯대', shop: 'ruby', seal: 's1', price: 7700000000, luck: 1.35, reel: 2.65, bite: 0.17, zone: 0.26, perk: '특기: 봉인된 신전의 불꽃 · 운과 입질이 모두 뛰어나요',
+  { name: '루비 신전의 홍염 낚싯대', shop: 'shrine', seal: 's1', bossZone: 0.32, price: 7700000000, luck: 1.35, reel: 2.65, bite: 0.17, zone: 0.26, perk: '특기: 봉인된 신전의 불꽃 · 운과 입질이 모두 뛰어나요',
     color: 0xf0e0d8, color2: 0xff6a3a, grip: 0x5a1a14, accent: 0xd8b040, reelC: 0xe8d8d0, rings: 0, metal: 0.55, rough: 0.2, glow: 0xff5a1a, tip: 'none', orbit: 6, style: 'ruby4' },
-  { name: '루비 왕관 낚싯대', shop: 'ruby', seal: 's2', price: 11000000000, luck: 1.55, reel: 2.9, bite: 0.14, zone: 0.26, perk: '특기: 운 · 게이지 · 입질이 모두 제일 좋아요',
+  { name: '루비 왕관 낚싯대', shop: 'shrine', seal: 's2', bossZone: 0.37, price: 11000000000, luck: 1.55, reel: 2.9, bite: 0.14, zone: 0.26, perk: '특기: 운 · 게이지 · 입질이 모두 제일 좋아요',
     color: 0xd8b040, color2: 0xff2a4a, grip: 0x3a0a14, accent: 0xffe8a0, reelC: 0xd8b040, rings: 0, metal: 0.85, rough: 0.18, glow: 0xff2a4a, tip: 'none', orbit: 10, style: 'ruby5' }
 ];
 RODS.forEach((r) => (r.shop = r.shop || 'base')); // 표시 없는 건 아래 상점 낚싯대
 // 규칙: 초록 칸(zone)은 더 이상 늘리지 않아요 — 새 낚싯대도 ZONE_CAP(0.27)을 넘지 않게 잘라요
 //  (새 낚싯대를 넣으면 다른 낚싯대 특기 멘트의 '제일 ~' 이 아직 맞는지 꼭 다시 확인하기)
-// 루비 섬 주민 4명: 루비 물고기를 부탁하고, 갖다주면 아주 큰 보상 (평균 약 10억)
-//  kind: 부탁하는 물고기 희귀도 / mut: 이로치가 붙은 물고기여야 하는지 / base: 보상 가운데 값 (x0.6~1.4)
+// 루비 섬 주민 4명: 루비 물고기를 부탁하고, 갖다주면 큰 보상 (평균 약 1억)
+//  kind: 부탁하는 물고기 희귀도 / mut: 이로치가 붙은 물고기여야 하는지 / base: 보상 가운데 값 (x0.6~1.4) — 넷의 평균이 약 1억
 const RUBY_NPCS = [
-  { id: 'lighthouse', name: '등대지기 홍 할멈', at: [6.5, 299], kind: ['common', 'uncommon'], base: 3e8, look: { skin: 0xe8c0a0, shirt: 0x8a2a2a, pants: 0x3a2a2a, boots: 0x2a1a1a, hair: 'long', hairColor: 0xe8e8e8, hat: 'bucket', hatColor: 0x5a1a1a },
+  { id: 'lighthouse', name: '등대지기 홍 할멈', at: [6.5, 299], kind: ['common', 'uncommon'], base: 3e7, look: { skin: 0xe8c0a0, shirt: 0x8a2a2a, pants: 0x3a2a2a, boots: 0x2a1a1a, hair: 'long', hairColor: 0xe8e8e8, hat: 'bucket', hatColor: 0x5a1a1a },
     lines: ['바닷바람이 짜지? 그래도 루비 바다 물고기는 달단다.', '젊은이, 부탁 하나 들어주겠나?'] },
-  { id: 'jeweler', name: '보석상 루비나', at: [-6, 312], kind: ['uncommon', 'rare'], base: 7e8, look: { skin: 0xf6d0b0, shirt: 0xd8203a, vest: 0xd8b040, vestPocket: 0xa8802a, pants: 0x2a1a2a, boots: 0x1a1a1a, hair: 'long', hairColor: 0x2a0a0a, glasses: 0xd8b040 },
+  { id: 'jeweler', name: '보석상 루비나', at: [-6, 312], kind: ['uncommon', 'rare'], base: 7e7, look: { skin: 0xf6d0b0, shirt: 0xd8203a, vest: 0xd8b040, vestPocket: 0xa8802a, pants: 0x2a1a2a, boots: 0x1a1a1a, hair: 'long', hairColor: 0x2a0a0a, glasses: 0xd8b040 },
     lines: ['반짝이는 비늘은 보석보다 귀하죠.', '좋은 물건엔 좋은 값을 쳐 드려요.'] },
-  { id: 'guardian', name: '신전 수호자 카르마', at: [3, 342], kind: ['legendary'], base: 2e9, look: { skin: 0xc89070, shirt: 0x5a1a1e, vest: 0xd8b040, vestPocket: 0xa8802a, pants: 0x3a1418, boots: 0x2a0a0a, hair: 'short', hairColor: 0x1a1a1a, beard: 0x1a1a1a, hat: 'cap', hatColor: 0xd8b040 },
+  { id: 'guardian', name: '신전 수호자 카르마', at: [3, 342], kind: ['legendary'], base: 2e8, look: { skin: 0xc89070, shirt: 0x5a1a1e, vest: 0xd8b040, vestPocket: 0xa8802a, pants: 0x3a1418, boots: 0x2a0a0a, hair: 'short', hairColor: 0x1a1a1a, beard: 0x1a1a1a, hat: 'cap', hatColor: 0xd8b040 },
     lines: ['신전은 강한 자에게만 문을 연다.', '전설의 물고기를 보고 싶구나.'] },
-  { id: 'kid', name: '꼬마 탐험가 미루', at: [13, 336], kind: ['common', 'uncommon', 'rare'], mut: true, base: 1.1e9, look: { skin: 0xf6d0b0, shirt: 0xffb03a, pants: 0x3a5a8a, boots: 0x8a3a2a, hair: 'short', hairColor: 0x8a4a2a, hat: 'cap', hatColor: 0xff3a4a },
+  { id: 'kid', name: '꼬마 탐험가 미루', at: [13, 336], kind: ['common', 'uncommon', 'rare'], mut: true, base: 1.1e8, look: { skin: 0xf6d0b0, shirt: 0xffb03a, pants: 0x3a5a8a, boots: 0x8a3a2a, hair: 'short', hairColor: 0x8a4a2a, hat: 'cap', hatColor: 0xff3a4a },
     lines: ['색깔이 다른 물고기 본 적 있어요? 반짝반짝한 거!', '호수에서 루비 조각 주웠어요!'] }
 ];
 const ZONE_CAP = 0.27;
@@ -1856,11 +1857,11 @@ Object.assign(npcs[2], { name: '섬 할아버지', li: 0, lines: [
   '젊었을 땐 이 호수가 지금의 반만 했단다.',
   '인생도 낚시도 결국 기다림이란다.'
 ] });
-// 고수 할배: 산 위 연못가에서 평생 낚시한 전설. 잡은 물고기가 약 10만 마리!
+// 고수 할배: 산 위 연못가에서 평생 낚시한 전설. 잡은 물고기가 약 12만 마리!
 addNPC({ skin: 0xe0b896, shirt: 0x1e2a4a, sleeve: 0x1e2a4a, pants: 0x2a2a3a, boots: 0x3a2a1a, hair: 'long', hairColor: 0xf2f2f2,
   beard: 0xf8f8f8, glasses: 0xc8a040, hat: 'straw', hatColor: 0xb89050, vest: 0x6a3a2a, vestPocket: 0x4a2a1a, rodColor: 0x2a2a6a },
   new THREE.Vector3(32.8, PLATEAU_TOP, -3.6), 0.64, new THREE.Vector3(30.6, TOP_Y + 0.13, -6.6), false);
-Object.assign(npcs[3], { name: '고수 할배', li: 0, count: 99812, lines: [
+Object.assign(npcs[3], { name: '고수 할배', li: 0, count: 119846, lines: [
   '자네, 초록 칸만 보지 말고 물고기 마음을 봐야 해.',
   '십만 마리쯤 잡으니 이제 물고기가 먼저 인사를 하더군. 허허.',
   '이 연못엔 이 세상에 없는 녀석들이 산다네. 왕관 쓴 놈은 나도 세 번밖에 못 봤어.',
@@ -2910,7 +2911,7 @@ function updateWalkers(now, dt, t) {
 const SAVE_KEY = 'lakeFishing_v2';
 // 살 수 있는 집 (seaworld.js 의 집 id 와 같아요). slots = 어항 칸 수
 const HOUSE_INFO = { sunset: { slots: 8 }, coral: { slots: 12 }, pine: { slots: 14 }, star: { slots: 18 }, whale: { slots: 26 }, hill2: { slots: 32 }, crimson3: { slots: 40 }, palace4: { slots: 50 } };
-const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {}, furn: {}, decor: {}, mats: {}, garden: {}, pets: { own: [], on: null, love: {}, nm: {}, t: 0 }, friends: {}, rewards: { dex: [] }, titles: [], title: '', fireworks: 0, museum: { fish: {}, paid: false }, ruby: { s1: 0, s2: 0, found: false, ferry: false, boss: { s1: false, s2: false }, q: {}, qDone: 0 } };
+const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {}, furn: {}, decor: {}, mats: {}, garden: {}, pets: { own: [], on: null, love: {}, nm: {}, t: 0 }, friends: {}, rewards: { dex: [] }, titles: [], title: '', fireworks: 0, museum: { fish: {}, paid: false }, ruby: { s1: 0, s2: 0, found: false, ferry: false, bossDone: false, q: {}, qDone: 0 } };
 
 // 저장된 기록은 누구나 개발자 도구로 고칠 수 있어서 그대로 믿으면 안 돼요.
 // 불러올 때 하나하나 검사해서, 이상한 값은 버리거나 안전한 값으로 바꿔요.
@@ -2962,7 +2963,8 @@ function cleanSave(s) {
   // 루비 신전 봉인: 바친 물고기 수 (0~2) — ruby.js
   // found = 루비 섬에 직접 가 봤는지 · ferry = 루비 섬 선착장에서 정기선을 열었는지
   out.ruby = { s1: intIn(s.ruby && s.ruby.s1, 0, 1, 0), s2: intIn(s.ruby && s.ruby.s2, 0, 1, 0), found: !!(s.ruby && s.ruby.found === true), ferry: !!(s.ruby && s.ruby.ferry === true),
-    boss: { s1: !!(s.ruby && s.ruby.boss && s.ruby.boss.s1 === true), s2: !!(s.ruby && s.ruby.boss && s.ruby.boss.s2 === true) }, q: {}, qDone: intIn(s.ruby && s.ruby.qDone, 0, 1e9, 0) }; // boss = 성소 보스를 낚았는지
+    // bossDone = 성소 보스(한 마리)를 낚았는지 (예전 세이브의 boss.s1/s2 도 인정)
+    bossDone: !!(s.ruby && (s.ruby.bossDone === true || (s.ruby.boss && (s.ruby.boss.s1 === true || s.ruby.boss.s2 === true)))), q: {}, qDone: intIn(s.ruby && s.ruby.qDone, 0, 1e9, 0) }; // boss = 성소 보스를 낚았는지
   // 루비 섬 주민 부탁: 주민마다 { fish: 물고기 이름, mut: 이로치 아무거나면 true, reward: 보상 }
   if (s.ruby && s.ruby.q && typeof s.ruby.q === 'object') for (const [k, v] of Object.entries(s.ruby.q)) {
     if (!RUBY_NPCS.some((n) => n.id === k) || !v || typeof v !== 'object') continue;
@@ -3385,7 +3387,7 @@ function renderDex() {
       const row = document.createElement('div');
       row.className = 'rodRow' + (owned ? '' : ' locked');
       // 가격 + 파는 곳
-      const where = { base: '마을 낚싯대 상점', mountain: '언덕 위 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글섬 정글 공방', ruby: '루비 섬 루비 공방' + (r.seal ? ' (봉인)' : '') }[r.shop];
+      const where = { base: '마을 낚싯대 상점', mountain: '언덕 위 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글섬 정글 공방', ruby: '루비 섬 루비 공방', shrine: '루비 신전 성소 (보스를 낚은 뒤)' }[r.shop];
       const priceLine = r.price ? `<div class="rodPrice">${money(r.price)} · ${where}</div>` : '<div class="rodPrice">처음부터 가진 낚싯대 (공짜)</div>';
       row.innerHTML = `<div class="sw" style="background:${hex(r.color)}"></div><div class="info"><div class="nm">${owned ? r.name : r.name + ' (미보유)'}</div>${priceLine}${r.perk ? `<div class="perk">${r.perk}</div>` : ''}${statsHTML(r)}</div>`;
       const btn = document.createElement('button');
@@ -3404,8 +3406,8 @@ function renderDex() {
 let rodShopKind = 'base';
 function renderRodShop() {
   const list = $('rodShopList');
-  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글 공방', ruby: '루비 공방' }[rodShopKind];
-  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요', jungle: ' · 정글 연못의 힘센 물고기는 이 낚싯대로만 낚을 수 있어요', ruby: ' · 루비 바다와 루비 호수의 물고기는 이 낚싯대로만 낚을 수 있어요. 가장 비싼 두 개는 루비 신전의 봉인을 풀어야 팔아요' }[rodShopKind] || ''}</div>`;
+  $('rodShopTitle').textContent = { base: '낚싯대 상점', mountain: '언덕 위 낚싯대 상점', aurora: '오로라 강 낚싯대 공방', jungle: '정글 공방', ruby: '루비 공방', shrine: '루비 신전 성소 · 신전 낚싯대' }[rodShopKind];
+  list.innerHTML = `<div class="count">가진 돈 ${money(save.money)}${{ mountain: ' · 산 위 연못의 기운이 깃든 특별한 낚싯대예요', aurora: ' · 오로라 강의 장인이 하나하나 깎아 만든 낚싯대예요. 가게 앞 전시대에서 실물을 볼 수 있어요', jungle: ' · 정글 연못의 힘센 물고기는 이 낚싯대로만 낚을 수 있어요', ruby: ' · 루비 바다와 루비 호수의 물고기는 이 낚싯대로만 낚을 수 있어요. 가장 비싼 두 낚싯대는 루비 신전 성소 안에서 팔아요', shrine: ' · 성소의 보스를 쓰러뜨린 사람만 살 수 있는 신전의 낚싯대예요' }[rodShopKind] || ''}</div>`;
   const grid = document.createElement('div');
   grid.className = 'rodGrid';
   list.appendChild(grid);
@@ -3422,7 +3424,7 @@ function renderRodShop() {
     else if (sealInfo && !rodUnlocked(r)) { // 봉인 → 성소 보스까지 해야 팔아요
       const sealed = (save.ruby[r.seal] || 0) < sealInfo.need;
       btn.textContent = sealed ? `봉인됨 · ${sealInfo.name}` : `보스를 낚아야 해요`; btn.disabled = true;
-      row.querySelector('.info').insertAdjacentHTML('beforeend', `<div class="perk" style="color:#ff8a9a">① 루비 신전의 봉인 2개 모두 풀기: ${SEALS.map((q) => `[${q.mut}] ${q.fish} ${q.need}마리${sealDone(q) ? ' (완료)' : ''}`).join(' · ')}<br>② 열린 신전 문 → 성소 연못에서 보스 「${sealInfo.boss}」 낚기<br>가격 ${money(r.price)}</div>`);
+      row.querySelector('.info').insertAdjacentHTML('beforeend', `<div class="perk" style="color:#ff8a9a">① 루비 신전의 봉인 2개 모두 풀기: ${SEALS.map((q) => `[${q.mut}] ${q.fish} ${q.need}마리${sealDone(q) ? ' (완료)' : ''}`).join(' · ')}<br>② 열린 신전 문 → 성소 연못에서 보스 「${RUBY_BOSS}」 낚기<br>③ 성소 제단 앞 낚싯대에서 사기 · 가격 ${money(r.price)}</div>`);
       if (!sealed && !doorOpen()) btn.textContent = '봉인이 하나 남았어요';
     }
     else {
@@ -3647,7 +3649,7 @@ function interact() {
   if (s.kind === 'rubynpc') { openRubyQuest(s.npc); return; }    // 루비 섬 주민 부탁
   if (s.kind === 'ferry') { useFerry(s.to); return; }            // 루비 섬 정기선
   if (s.kind === 'museumdesk') { openMuseumDesk(); return; }     // 박물관 안내 데스크
-  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3' || s.kind === 'rod4' || s.kind === 'rod5') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora', rod4: 'jungle', rod5: 'ruby' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
+  if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3' || s.kind === 'rod4' || s.kind === 'rod5' || s.kind === 'rod6') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora', rod4: 'jungle', rod5: 'ruby', rod6: 'shrine' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
   else { renderSell(); openPanel(ui.sellPanel); }
 }
 
@@ -3880,7 +3882,7 @@ function cast() {
     game.blockMsg = '정글 물고기는 힘이 너무 세요! 정글 공방 낚싯대로만 낚을 수 있어요.';
   }
   // 루비 물고기는 더 세서 루비 공방 낚싯대로만 낚을 수 있어요
-  if (game.inWater && wtr.ruby && curRod().shop !== 'ruby') {
+  if (game.inWater && wtr.ruby && curRod().shop !== 'ruby' && curRod().shop !== 'shrine') {
     game.inWater = false; game.castWater = null;
     game.blockMsg = '루비 물고기는 보석처럼 단단하고 힘이 엄청 세요! 루비 공방 낚싯대로만 낚을 수 있어요.';
   }
@@ -3909,7 +3911,7 @@ function startReel() {
   const f = findFish(fish.name);
   const R = RARITY[f.rarity];
   // 초록 칸 크기는 낚싯대가 정해요 (어떤 물고기든 같아요). 물고기는 날뛰는 속도 · 게이지 차는 속도를 바꿔요.
-  const zoneW = zoneOf(curRod()) * (f.boss ? 0.45 : 1); // 보스: 초록 칸이 확 줄어 회색 막대가 훨씬 길어요
+  const zoneW = f.boss ? bossZoneOf(curRod()) : zoneOf(curRod()); // 보스: 낚싯대마다 정해진 보스전 초록 칸 (회색 막대가 훨씬 길어요)
   const d = reelDifficulty(fish, f);
   game.reel = { fish, zoneW, zone: 0.5 - zoneW / 2, vel: 0, fishPos: 0.5, target: 0.5, nextJump: 0, progress: 0.3, speed: d.speed, jump: d.jump, fill: d.fill, lose: d.lose, boss: !!f.boss, heavy: fishScale(f, fish.weight) >= 2 };
   ui.reelBox.classList.toggle('bossReel', !!f.boss);
@@ -3925,6 +3927,8 @@ function startReel() {
 //  - $1,000만 이상: 초록 칸 안에 있어도 게이지가 느리게 차요
 //  - 보스: 지금 있는 물고기 중 제일 심하게 요동치고 게이지도 아주 느리게 차요 (대신 놓쳐도 게이지가 조금 천천히 줄어요)
 const FISH_SPEED_UP = 1.3, FISH_JUMP_UP = 0.8;
+// 보스전 초록 칸: 루비 낚싯대는 bossZone 값 (낚싯대마다 달라요), 다른 낚싯대는 초록 칸 보너스로 계산
+const bossZoneOf = (r) => r.bossZone ?? Math.min(0.3, 0.12 + r.zone * 0.6);
 function reelDifficulty(fish, f) {
   const R = RARITY[f.rarity], price = Math.max(1, fish.price || 1);
   const hard = Math.min(1, Math.max(0, Math.log10(price / 1e6) / 3));
@@ -4726,7 +4730,7 @@ function updateCamera() {
   let dist = cam.dist;
   camRay.set(tmpV.set(p.x, ty, p.z), camDir);
   camRay.far = cam.dist;
-  const hit = camRay.intersectObjects([...shops.map((s) => s.group), terrain], true)[0];
+  const hit = camRay.intersectObjects([...shops.map((s) => s.group), terrain, ...(game.room ? seaWorld.roomBlockers : [])], true)[0];
   if (hit) dist = Math.max(1.5, hit.distance - 0.3);
   // 정글섬: 나무 줄기가 카메라와 나 사이에 끼면 카메라를 줄기 앞으로 당겨요 (줄기에 화면이 가려지지 않게)
   if (Math.hypot(p.x - JUNGLE.x, p.z - JUNGLE.z) < JUNGLE.r + 6) {
@@ -5621,6 +5625,7 @@ function enterHouse(h, then) {
     camBeforeRoom = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, fp: cam.fp };
     if (cam.fp) setFirstPerson(false);
     cam.yaw = Math.PI; // 방에서는 앞쪽(-z)에 카메라가 있어요 → W 가 방 안쪽으로
+    if (h.freeCam) { cam.pitch = 0.5; cam.dist = Math.max(cam.dist, 9); } // 넓은 집: 평소 시점
     game.room = h; game.indoors = true; roomCam.ready = false;
     person.position.set(h.enterAt.x, groundY(h.enterAt.x, h.enterAt.z), h.enterAt.z);
     player.ry = Math.PI; person.rotation.y = player.ry;
@@ -5647,6 +5652,18 @@ function enterRoom(h) {
     if (h.id === 'shrine') shrineEntered();
   });
 }
+// 윗층 · 아랫층으로 옮기기 (같은 집의 다른 층 방으로)
+function changeLevel(R, dir) {
+  const H = R.home || R, T = H.levels && H.levels[(R.level || 0) + dir];
+  if (!T) return;
+  fadeMove(() => {
+    game.room = T; roomCam.ready = false;
+    const a = dir > 0 ? T.down : T.up; // 올라가면 윗층 '내려가는 계단' 앞, 내려가면 아랫층 '올라가는 계단' 앞
+    person.position.set(a.x, groundY(a.x, a.z - 1.2), a.z - 1.2);
+    player.ry = 0; person.rotation.y = 0; // 계단을 등지고 서요
+    game.notice = `${H.name} ${(T.level || 0) + 1}층${T.level ? ' · 왼쪽 뒤 계단으로 내려가요' : ''}${T.up ? ' · 오른쪽 뒤 계단으로 올라가요' : ''}`; updateUI();
+  });
+}
 function exitHouse(h, now) {
   if (!game.room) return;
   const go = () => {
@@ -5667,7 +5684,9 @@ function updateDoors() {
   const p = person.position;
   if (game.room) {
     const h = game.room;
-    if (Math.abs(p.x - h.exitAt.x) < 0.75 && p.z < h.exitAt.z && player.moving && Math.cos(player.ry) > 0.3) exitHouse(h);
+    if (h.exitAt && Math.abs(p.x - h.exitAt.x) < 0.75 && p.z < h.exitAt.z && player.moving && Math.cos(player.ry) > 0.3) { exitHouse(h); return; }
+    // 여러 층 집: 계단 발치에서 계단 쪽(+z)으로 걸어가면 윗층 · 아랫층으로 (화면이 까매졌다가)
+    for (const [st, dir] of [[h.up, 1], [h.down, -1]]) if (st && Math.hypot(p.x - st.x, p.z - st.z) < 1.0 && player.moving && Math.cos(player.ry) < -0.3) { changeLevel(h, dir); return; }
     return;
   }
   // 박물관 문: 현관에서 동쪽(문 쪽)으로 걸어가면 들어가요 (ry = π/2 면 -x, -π/2 면 +x 쪽을 봐요)
@@ -5717,7 +5736,7 @@ function useFurniture(h, f) {
     // 앉기 (소파·식탁 의자·피아노 의자)
     game.sitting = { ...f.seat, stand: f.stand, house: true };
   }
-  if (f.type === 'sofa') { game.notice = '푹신한 소파에 앉았어요. E 또는 방향키로 일어나요.'; }
+  if (f.type === 'sofa') { game.notice = f.sitMsg || '푹신한 소파에 앉았어요. E 또는 방향키로 일어나요.'; }
   else if (f.type === 'bed') {
     // 잠깐 화면이 깜깜해졌다가 아침이 돼요
     const fade = $('sleepFade');
@@ -5742,6 +5761,17 @@ function useFurniture(h, f) {
     softBuff(0.03, 150);
     game.notice = `따뜻한 차를 한 잔 마셨어요. (따뜻함: 운 +3% · 2분 30초)${f.seat ? ' E 로 일어나요.' : ''}`;
     tone(523, 0.1, 'triangle', 0.05); tone(659, 0.12, 'triangle', 0.05, 0.12);
+  } else if (f.type === 'lamp') {
+    // 조명: 빛나는 블록을 켰다 껐다
+    if (f.glow) f.glow.visible = !f.glow.visible;
+    game.notice = !f.glow || f.glow.visible ? '불을 켰어요. 방이 환해요.' : '불을 껐어요.';
+    tone(f.glow && !f.glow.visible ? 440 : 880, 0.05, 'square', 0.03);
+  } else if (f.type === 'msg') {
+    // 그 밖의 가구: 만져 보면 한마디 (오락기 뿅뿅 · 레코드 노래)
+    game.notice = f.msgs[Math.floor(Math.random() * f.msgs.length)];
+    if (f.snd === 'tune') [392, 440, 494, 523, 494, 440, 392].forEach((n, i) => tone(n, 0.35, 'sine', 0.05, i * 0.3));
+    else if (f.snd === 'beep') [988, 784, 1319, 1047].forEach((n, i) => tone(n, 0.08, 'square', 0.03, i * 0.09));
+    else { tone(660, 0.08, 'triangle', 0.04); tone(880, 0.1, 'triangle', 0.03, 0.08); }
   } else if (f.type === 'piano') {
     // 짧은 노래 한 소절 (도레미…)
     const notes = [523, 587, 659, 523, 659, 698, 784, 0, 784, 880, 784, 698, 659, 523];
@@ -6091,9 +6121,9 @@ function openSeal(i) {
   const S = SEALS[i], have = save.ruby[S.id] || 0, done = have >= S.need;
   $('museumTitle').textContent = `루비 신전 · ${S.name}`;
   const body = $('museumBody');
-  const bossDone = !!save.ruby.boss[S.id];
-  body.innerHTML = `<div class="count">${done && !doorOpen() ? `<b style="color:#9affb0">이 봉인은 풀렸어요!</b> 반대쪽 제단의 봉인도 풀어야 신전 문이 열려요.` : done ? (bossDone ? `<b style="color:#9affb0">봉인도 풀고 보스도 낚았어요!</b> 루비 공방에서 <b>${esc(S.rod)}</b>을(를) 살 수 있어요.` : `<b style="color:#9affb0">봉인이 풀렸어요!</b> 신전 문이 열렸어요. 문 안 <b>성소 연못</b>에서 보스 <b style="color:#ff8a9a">「${esc(S.boss)}」</b>를 낚으면 <b>${esc(S.rod)}</b>을(를) 살 수 있어요.`)
-    : `제단에 <b style="color:#ff8a9a">[${S.mut}] ${esc(S.fish)}</b>를 <b>${S.need}마리</b> 바치면 봉인이 풀려요. 지금 ${have} / ${S.need}마리.<br>이로치가 여러 개 겹친 물고기도 ${S.mut}가 섞여 있으면 돼요. 봉인을 풀면 신전 문이 열리고, 안쪽 성소에서 보스를 낚아야 낚싯대를 살 수 있어요.`}</div>`;
+  const bossDone = !!save.ruby.bossDone;
+  body.innerHTML = `<div class="count">${done && !doorOpen() ? `<b style="color:#9affb0">이 봉인은 풀렸어요!</b> 반대쪽 제단의 봉인도 풀어야 신전 문이 열려요.` : done ? (bossDone ? `<b style="color:#9affb0">봉인도 풀고 보스도 낚았어요!</b> 성소 제단 앞 낚싯대에서 신전 낚싯대 2개를 살 수 있어요.` : `<b style="color:#9affb0">봉인이 모두 풀렸어요!</b> 신전 문이 열렸어요. 문 안 <b>성소 연못</b>에서 보스 <b style="color:#ff8a9a">「${esc(RUBY_BOSS)}」</b>를 낚으면 성소 안에서 신전 낚싯대 2개를 살 수 있어요.`)
+    : `제단에 <b style="color:#ff8a9a">[${S.mut}] ${esc(S.fish)}</b>를 <b>${S.need}마리</b> 바치면 봉인이 풀려요. 지금 ${have} / ${S.need}마리.<br>이로치가 여러 개 겹친 물고기도 ${S.mut}가 섞여 있으면 돼요. 봉인 2개를 모두 풀면 신전 문이 열리고, 안쪽 성소에서 보스를 낚으면 성소 안에서 신전 낚싯대를 살 수 있어요.`}</div>`;
   if (!done) {
     const fit = save.inv.filter((it) => sealFits(it, S));
     body.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 속 맞는 물고기 (${fit.length}마리)</h3>`);
@@ -6122,13 +6152,14 @@ function openSeal(i) {
 // 정기선: 화면이 까매졌다가 반대편 선착장으로
 // =====================================================
 //  루비 신전 성소 · 보스
-//   봉인 풀기(물고기 1마리) → 신전 문 열림 + 빛기둥 → 문 앞 E 로 성소 → 연못에서 보스 낚기 → 공방에서 낚싯대 구매
+//   봉인 2개 풀기(봉인마다 물고기 1마리) → 신전 문 열림 + 빛기둥 → 문 앞 E 로 성소 → 연못에서 보스(한 마리) 낚기
+//   → 성소 제단 앞에 신전 낚싯대 2개가 빛 가루로 나타나요 → 그 앞에서 E 로 사요 (루비 공방에서는 안 팔아요)
 //   처음 하는 사람도 알 수 있게: 큰 글자 알림(배너) · 왼쪽 위 할 일 줄 · 연못 속 보스 그림자 · 보스 등장 연출
 // =====================================================
 const sealDone = (S) => (save.ruby[S.id] || 0) >= S.need;
 const doorOpen = () => SEALS.every(sealDone); // 봉인 2개를 모두 풀어야 신전 문이 열려요
-const pendingBoss = () => (doorOpen() ? SEALS.find((S) => !save.ruby.boss[S.id]) || null : null);
-const rodUnlocked = (r) => { const S = r.seal && SEALS.find((q) => q.id === r.seal); return !S || (doorOpen() && !!save.ruby.boss[S.id]); };
+const pendingBoss = () => (doorOpen() && !save.ruby.bossDone ? { boss: RUBY_BOSS } : null); // 보스는 한 마리
+const rodUnlocked = (r) => !r.seal || (doorOpen() && !!save.ruby.bossDone); // 신전 낚싯대: 봉인 2개 + 보스
 // 화면 가운데 큰 글자 알림
 const bannerEl = (() => {
   const el = document.createElement('div');
@@ -6177,17 +6208,16 @@ function bossAppears(f) {
   tone(110, 0.8, 'sawtooth', 0.07); tone(82, 1.2, 'sawtooth', 0.06, 0.25); tone(147, 0.6, 'square', 0.04, 0.6);
 }
 function bossCaught(f) {
-  const S = SEALS.find((q) => q.id === f.boss);
-  if (!S) return;
-  save.ruby.boss[S.id] = true;
-  writeSave(); ruby.setSeals(save); updateBossHud();
-  try { showShrineRod(SEALS.indexOf(S), true); } catch (e) { console.warn('[성소 낚싯대]', e); }
-  showBanner('보스를 낚았어요!!', `「${f.name}」을(를) 쓰러뜨렸어요. 이제 루비 공방에서 「${S.rod}」을(를) 살 수 있어요!`, '#9affb0', 7000);
-  game.notice = `보스 「${f.name}」을(를) 낚았어요! 루비 공방에서 ${S.rod}을(를) 팔기 시작했어요.`;
+  if (!f.boss || save.ruby.bossDone) return;
+  save.ruby.bossDone = true;
+  writeSave(); ruby.setSeals(save); updateBossHud(); syncShrineShop();
+  try { SEALS.forEach((S, i) => showShrineRod(i, true)); } catch (e) { console.warn('[성소 낚싯대]', e); }
+  showBanner('보스를 낚았어요!!', `「${f.name}」을(를) 쓰러뜨렸어요. 성소 제단 앞에 신전 낚싯대 2개가 나타났어요 — 그 앞에서 E 로 살 수 있어요!`, '#9affb0', 7000);
+  game.notice = `보스 「${f.name}」을(를) 낚았어요! 성소 제단 앞 낚싯대에서 신전 낚싯대 2개를 살 수 있어요.`;
   tone(523, 0.2, 'triangle', 0.08); tone(659, 0.2, 'triangle', 0.08, 0.15); tone(784, 0.2, 'triangle', 0.08, 0.3); tone(1047, 0.6, 'triangle', 0.08, 0.45);
 }
 // =====================================================
-//  루비 섬 주민 부탁 (평균 보상 약 10억)
+//  루비 섬 주민 부탁 (평균 보상 약 1억)
 // =====================================================
 function newRubyQuest(n) {
   const pool = FISH.filter((f) => f.zone === 'ruby' && n.kind.includes(f.rarity));
@@ -6225,19 +6255,30 @@ function openRubyQuest(n) {
   body.appendChild(re);
   openPanel(museumPanel);
 }
-// ---------- 보스를 잡으면: 성소 제단 앞에 그 낚싯대가 기대어 나타나요 ----------
+// ---------- 보스를 잡으면: 제단 양옆 돌기둥에 그 낚싯대가 기대어 나타나요 ----------
 //  가루(빛 알갱이)가 사방에서 모여들다가 → 낚싯대 모양으로 반짝 생겨나요. 다음부터는 그냥 놓여 있어요
 const shrineRods = SEALS.map((S, i) => {
   const r = RODS.find((q) => q.name === S.rod);
   const holder = new THREE.Group(); holder.userData.dynamic = true;
-  // 제단 첫 계단(높이 0.5) 위에 세우고, 둘째 계단 모서리(앞 z1-6, 높이 1.0)와 용 머리에 기대요 (윗부분이 제단 쪽 +z)
-  const tilt = 0.3, bx = shrine.room.x + (i ? 2.4 : -2.4), by = shrine.room.floorY + 0.5, bz = shrine.room.z1 - 6.15;
-  holder.position.set(bx, by + Math.cos(tilt) * ROD_LEN / 2, bz + Math.sin(tilt) * ROD_LEN / 2);
-  holder.rotation.set(tilt, 0, 0);
+  // 제단 양옆 분홍 돌기둥(연못 둘레 기둥 8개 중 제단 쪽 2개)에 기대 세워요
+  //  shrine.js 기둥: 각도 a = k/8·2π + π/8, 연못 한가운데에서 r + 4.2 칸, 기둥 반지름 0.4 · 받침 1.2칸
+  //  홍염(왼쪽) = k 2, 왕관(오른쪽) = k 1. 낚싯대 발은 기둥 받침 바로 앞(연못 쪽) 바닥, 윗부분이 기둥 몸통에 닿아요
+  const P = SHRINE_POOL, k = i ? 1 : 2, a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+  const pcx = P.x + Math.cos(a) * (P.r + 4.2), pcz = P.z + Math.sin(a) * (P.r + 4.2);
+  const dx = -Math.cos(a), dz = -Math.sin(a);            // 기둥 → 연못 쪽 (낚싯대가 서는 쪽)
+  const footR = 0.78, topR = 0.42, tilt = Math.asin((footR - topR) / ROD_LEN);
+  const bx = pcx + dx * footR, bz = pcz + dz * footR, by = shrine.room.floorY + 0.02;
+  holder.rotation.order = 'YXZ';
+  holder.rotation.set(tilt, Math.atan2(-dx, -dz), 0); // 윗부분이 기둥 쪽으로 기울어요
+  holder.position.set(bx - dx * Math.sin(tilt) * ROD_LEN / 2, by + Math.cos(tilt) * ROD_LEN / 2, bz - dz * Math.sin(tilt) * ROD_LEN / 2);
   const sp = r ? buildRod(r, holder) : [];
   holder.visible = false; scene.add(holder);
   return { holder, sp, fx: null, base: holder.position.clone() };
 });
+// 성소 진열대: 제단 앞 두 낚싯대 사이에서 E → 신전 낚싯대 상점 (보스를 낚은 뒤에만 켜져요)
+const shrineShop = { kind: 'rod6', title: '신전 낚싯대 · 사기 (E)', group: new THREE.Group(), pos: new THREE.Vector3(shrine.room.x, shrine.room.floorY, shrine.room.z1 - 8.0), promptAt: new THREE.Vector3(shrine.room.x, shrine.room.floorY + 3.6, shrine.room.z1 - 7.0), r: 2.6, off: true };
+shops.push(shrineShop);
+function syncShrineShop() { shrineShop.off = !save.ruby.bossDone; }
 const rodDustM = new THREE.MeshBasicMaterial({ color: 0xffd8a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
 function showShrineRod(i, animate) {
   const sr = shrineRods[i];
@@ -6364,7 +6405,9 @@ function updateHouses(t) {
   museum.update(t, inMuseum, roomCam.t);
   for (const h of seaWorld.houses) {
     // 집 안(방)에 있으면: 비는 안 오고, 따뜻한 방 불빛을 켜요 (밤엔 조금 더 밝게)
-    const inside = game.room === h;
+    const inside = game.room === h || (!!game.room && game.room.home === h); // 윗층 방에 있어도 내 집
+    if (inside && game.room !== h) for (const L of h.roomLights) { L.position.x = game.room.x + (L.userData.ox ?? (L.userData.ox = L.position.x - h.x)); L.position.z = game.room.z - 0.5; }
+    else if (inside) for (const L of h.roomLights) if (L.userData.ox !== undefined) { L.position.x = h.x + L.userData.ox; L.position.z = h.z - 0.5; }
     if (inside) rainLines.visible = false;
     const lw = inside ? (isNight() ? 2.6 : 1.7) : 0;
     for (const L of h.roomLights) if (L.intensity !== lw) L.intensity = lw;
@@ -6404,7 +6447,8 @@ applyRod();
 museum.refresh(); // 박물관 이름판 · 기증한 물고기
 ruby.setSeals(save); // 루비 신전 봉인 (풀린 봉인은 불이 꺼져요)
 syncFerry();         // 정기선 열렸는지
-SEALS.forEach((S, i) => { if (save.ruby.boss[S.id]) showShrineRod(i, false); }); // 이미 잡은 보스의 낚싯대는 성소 제단 앞에
+if (save.ruby.bossDone) SEALS.forEach((S, i) => showShrineRod(i, false)); // 보스를 이미 낚았으면 신전 낚싯대 2개가 제단 양옆 기둥에 기대어
+syncShrineShop();
 rebuildHero(save.outfit); // 저장해 둔 옷 입기
 renderHotbar();
 updateQuestHud();

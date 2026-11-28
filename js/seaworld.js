@@ -279,6 +279,7 @@ export function buildSeaWorld(ctx) {
   const ROOM_X0 = -160, ROOM_GAP = 60, ROOM_Z = -420;
   const houses = [];
   const houseBlockers = []; // 카메라가 벽을 뚫지 않게
+  const roomBlockers = [];  // 평소 시점인 넓은 방: 카메라가 방 벽 밖(까만 곳)으로 나가지 않게 막는 안 보이는 벽
 
   function makeSeaIsland(x, z, r) {
     deco.add(new THREE.CylinderGeometry(1, 1.12, 1, 28), 0xe8d4a4, [x, -0.38, z], [0, 0, 0], [r * 1.12, 1.0, r * 1.12]);   // 모래
@@ -700,6 +701,169 @@ export function buildSeaWorld(ctx) {
       bigKinds: { dining: big, piano: kind === 'tower' || kind === 'grand', bed2: huge }
     };
     h.setStyle(defStyle);
+    // ----- 넓은 집은 평소 시점 · 여러 층 집은 윗층 방 (계단으로 오르내려요) -----
+    //  방이 넓어서(폭 17칸 넘게) 고정 시점으로 한눈에 안 들어오면 평소 시점(마우스로 돌리기 · 휠 확대)
+    h.freeCam = rw > 17; h.level = 0; h.home = h; h.levels = [h]; h.exitAt = h.exitAt;
+    const invM = new THREE.MeshBasicMaterial({ visible: false });
+    const camWalls = (cx, cz, w2, d2) => {
+      const g = new THREE.Group(); g.userData.dynamic = true;
+      for (const [px, pz, sx, sz] of [[cx, cz + d2 / 2, w2 + 2, 0.6], [cx, cz - d2 / 2, w2 + 2, 0.6], [cx - w2 / 2, cz, 0.6, d2 + 2], [cx + w2 / 2, cz, 0.6, d2 + 2]]) { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, 12, sz), invM); m.position.set(px, y0 + 6, pz); g.add(m); }
+      scene.add(g); roomBlockers.push(g);
+    };
+    if (h.freeCam) camWalls(rx, rz, rw, rd);
+    if (floors > 1) {
+      const S0 = HOUSE_STYLES[defStyle] || HOUSE_STYLES[0];
+      const lb = new DecoBatch(THREE), lt = new DecoBatch(THREE);
+      const paper = new THREE.Color(S0.wall).lerp(new THREE.Color(0xffffff), 0.45).getHex(), paper2 = new THREE.Color(S0.wall).lerp(new THREE.Color(0xffffff), 0.25).getHex();
+      const STEP = 0.45, NST = 10;
+      // 올라가는 계단 (방 오른쪽 뒤 구석): 디딤판 10칸 + 옆판(나뭇결) + 난간 기둥 + 손잡이 → 위로 사라져요
+      const stairsUp = (b, cx, zBack, fy) => {
+        for (let k = 0; k < NST; k++) {
+          const zz = zBack - NST * STEP + (k + 0.5) * STEP, hh = (k + 1) * (RH / NST);
+          b.add(BOX, k % 2 ? 0xa87a4a : 0xb88a5a, [cx, fy + hh / 2, zz], [0, 0, 0], [2.0, hh, STEP]);
+          b.add(BOX, 0x8a5a32, [cx, fy + hh + 0.012, zz - STEP / 2 + 0.05], [0, 0, 0], [2.0, 0.025, 0.1]); // 디딤판 코
+        }
+        for (const s of [-1, 1]) {
+          b.add(BOX, 0x6a4224, [cx + s * 1.04, fy + RH / 2, zBack - NST * STEP / 2], [-Math.atan2(RH, NST * STEP), 0, 0], [0.08, 0.3, Math.hypot(RH, NST * STEP)]); // 옆판
+          for (let k = 0; k < NST; k += 2) { const zz = zBack - NST * STEP + (k + 0.5) * STEP, hh = (k + 1) * (RH / NST); b.add(BOX, 0x5a3a22, [cx - 1.0, fy + hh + 0.45, zz], [0, 0, 0], [0.06, 0.9, 0.06]); } // 난간 기둥
+        }
+        b.add(BOX, 0x4a2a14, [cx - 1.0, fy + RH / 2 + 0.9, zBack - NST * STEP / 2], [-Math.atan2(RH, NST * STEP), 0, 0], [0.09, 0.09, Math.hypot(RH, NST * STEP)]); // 손잡이
+        for (let k = 0; k < NST; k += 2) addCollider(cx, zBack - NST * STEP + (k + 0.5) * STEP + 0.2, 1.05);
+        return { x: cx, z: zBack - NST * STEP - 0.7 };
+      };
+      // 내려가는 계단 (방 왼쪽 뒤 구석): 바닥에 뚫린 계단 구멍 — 디딤판이 아래로 한 칸씩 내려가며 어두워져요
+      //  + 구멍 벽(벽지 · 판벽 띠) + 바닥 테두리(몰딩) + 양옆 · 앞 난간 (앞 가운데는 비워서 들어가요)
+      const HW = 1.05, DROP = 0.34, PIT = NST * DROP + 0.6;
+      const stairsDown = (b, cx, zBack, fy) => {
+        const z0d = zBack - NST * STEP, zc = zBack - NST * STEP / 2, fl = fy - 0.03;
+        for (let k = 0; k < NST; k++) {
+          const top = fl - (k + 1) * DROP, bot = fl - PIT, dk = 1 - k * 0.075, zz = z0d + (k + 0.5) * STEP;
+          const c = new THREE.Color(k % 2 ? 0xa87a4a : 0xb88a5a).multiplyScalar(dk).getHex();
+          b.add(BOX, c, [cx, (top + bot) / 2, zz], [0, 0, 0], [HW * 2 - 0.04, top - bot, STEP]);
+          b.add(BOX, new THREE.Color(0x8a5a32).multiplyScalar(dk).getHex(), [cx, top + 0.012, zz - STEP / 2 + 0.05], [0, 0, 0], [HW * 2 - 0.04, 0.025, 0.1]); // 디딤판 코
+          for (const sd of [-1, 1]) b.add(BOX, new THREE.Color(0x6a4224).multiplyScalar(dk).getHex(), [cx + sd * (HW - 0.06), top + 0.03, zz], [0, 0, 0], [0.08, 0.06, STEP]); // 옆 몰딩
+          b.add(BOX, new THREE.Color(0x4a2c16).multiplyScalar(dk).getHex(), [cx, top - DROP / 2, zz - STEP / 2 - 0.012], [0, 0, 0], [HW * 2 - 0.1, DROP - 0.02, 0.02]); // 챌판 (계단 앞면을 어둡게 → 한 칸씩 또렷이)
+        }
+        // 구멍 벽 (양옆 · 뒤 · 앞): 짙은 나무 판벽, 아래로 갈수록 더 어두운 띠 4단
+        for (let q = 0; q < 4; q++) {
+          const yb = fl - (q + 0.5) * (PIT / 4), hgt = PIT / 4 + 0.01, col = new THREE.Color(0x7a5232).multiplyScalar(0.8 - q * 0.17).getHex();
+          for (const sd of [-1, 1]) b.add(BOX, col, [cx + sd * (HW + 0.05), yb, zc], [0, 0, 0], [0.1, hgt, NST * STEP + 0.2]);
+          b.add(BOX, col, [cx, yb, zBack + 0.05], [0, 0, 0], [HW * 2 + 0.2, hgt, 0.1]);
+          b.add(BOX, col, [cx, yb, z0d - 0.05], [0, 0, 0], [HW * 2 + 0.2, hgt, 0.1]);
+        }
+        b.add(BOX, 0x050404, [cx, fl - PIT - 0.05, zc], [0, 0, 0], [HW * 2 + 0.3, 0.1, NST * STEP + 0.3]); // 바닥 끝 어둠
+        // 벽 쪽 손잡이: 계단 기울기를 따라 내려가요 (받침쇠 4개) + 맨 아래 아래층 불빛 (따뜻한 빛 줄)
+        const slope = Math.atan2(NST * DROP, NST * STEP), sl = Math.hypot(NST * DROP, NST * STEP);
+        b.add(BOX, 0xc89a5a, [cx - HW + 0.06, fl - NST * DROP / 2 + 0.8, zc], [slope, 0, 0], [0.07, 0.07, sl]);
+        for (let k = 1; k < NST; k += 3) b.add(BOX, 0x8a6a4a, [cx - HW + 0.03, fl - (k + 0.5) * DROP + 0.8, z0d + (k + 0.5) * STEP], [0, 0, 0], [0.06, 0.05, 0.05]);
+        glow.add(BOX, 0xffc890, [cx, fl - PIT + 0.9, zBack - 0.01], [0, 0, 0], [HW * 2 - 0.3, 0.5, 0.02]);
+        glow.add(BOX, 0xffb070, [cx, fl - NST * DROP + 0.015, zBack - STEP * 0.5], [0, 0, 0], [HW * 2 - 0.3, 0.02, STEP * 0.8]);
+        // 바닥 테두리 (구멍 가장자리 몰딩)
+        for (const sd of [-1, 1]) b.add(BOX, 0x6a4224, [cx + sd * (HW + 0.06), fy + 0.02, zc], [0, 0, 0], [0.14, 0.05, NST * STEP + 0.26]);
+        b.add(BOX, 0x6a4224, [cx, fy + 0.02, z0d - 0.06], [0, 0, 0], [HW * 2 + 0.26, 0.05, 0.14]);
+        b.add(BOX, 0x6a4224, [cx, fy + 0.02, zBack + 0.06], [0, 0, 0], [HW * 2 + 0.26, 0.05, 0.14]);
+        // 난간: 양옆 (기둥 6 + 손잡이 + 기둥 머리) + 앞 양쪽 짧은 난간 (가운데 1.2칸은 입구)
+        for (const sd of [-1, 1]) {
+          for (let k = 0; k <= 5; k++) { const pz = z0d + k * (NST * STEP / 5); b.add(BOX, 0x5a3a22, [cx + sd * (HW + 0.06), fy + 0.47, pz], [0, 0, 0], [0.07, 0.9, 0.07]); }
+          for (const pz of [z0d, zBack]) b.add(BOX, 0x4a2a14, [cx + sd * (HW + 0.06), fy + 0.98, pz], [0, 0, 0], [0.14, 0.1, 0.14]); // 기둥 머리
+          b.add(BOX, 0x4a2a14, [cx + sd * (HW + 0.06), fy + 0.93, zc], [0, 0, 0], [0.1, 0.08, NST * STEP]);
+          b.add(BOX, 0x4a2a14, [cx + sd * (HW - 0.22), fy + 0.93, z0d - 0.06], [0, 0, 0], [0.56, 0.08, 0.1]); // 앞 짧은 난간
+          b.add(BOX, 0x5a3a22, [cx + sd * (HW - 0.45), fy + 0.47, z0d - 0.06], [0, 0, 0], [0.07, 0.9, 0.07]);
+          for (let k = 0; k < 5; k++) addCollider(cx + sd * (HW + 0.06), z0d + (k + 0.5) * (NST * STEP / 5), 0.3);
+        }
+        for (const ox of [-0.75, 0, 0.75]) addCollider(cx + ox, z0d + 0.25, 0.32); // 구멍에 빠지지 않게 (계단 발치에서 걸어가면 내려가요)
+        return { x: cx, z: z0d - 0.7 };
+      };
+      // 윗층 바닥: 계단 구멍 자리만 비우고 깔아요 (사각형 - 구멍 = 4조각)
+      const holeRect = (fx0, fx1, fz0, fz1, hx0, hx1, hz0, hz1) => [
+        [fx0, hx0, fz0, fz1], [hx1, fx1, fz0, fz1], [hx0, hx1, fz0, hz0], [hx0, hx1, hz1, fz1]].filter(([a, b2, c, d]) => b2 - a > 0.01 && d - c > 0.01);
+      h.up = stairsUp(lb, rx1 - 1.6, rz1 - 0.35, y0 + 0.09);
+      const ROOMS = ['침실', '서재', '거실'];
+      for (let f = 1; f < floors; f++) {
+        const fx = rx, fz = ROOM_Z - 60 * f, fy = y0 + 0.09;
+        const fx0 = fx - rw / 2, fx1 = fx + rw / 2, fz0 = fz - rd / 2, fz1 = fz + rd / 2;
+        const vb = new THREE.Mesh(new THREE.BoxGeometry(rw + 60, 40, rd + 60), new THREE.MeshBasicMaterial({ color: 0x07060c, side: THREE.BackSide, fog: false }));
+        vb.position.set(fx, y0 + 6, fz - 6); vb.userData.dynamic = true; scene.add(vb);
+        // 바닥: 받침 + 마루 + 판자 줄 + 이음매
+        const hcx = fx0 + 1.6, hx0 = hcx - HW - 0.12, hx1 = hcx + HW + 0.12, hz1 = fz1 - 0.35 + 0.12, hz0 = fz1 - 0.35 - NST * STEP - 0.12;
+        const inHole = (px, pz, m = 0) => px > hx0 - m && px < hx1 + m && pz > hz0 - m && pz < hz1 + m;
+        for (const [a, b2, c, d] of holeRect(fx - rw / 2 - 0.6, fx + rw / 2 + 0.6, fz - rd / 2 - 0.6, fz + rd / 2 + 0.6, hx0, hx1, hz0, hz1)) lb.add(BOX, 0x6a5a4a, [(a + b2) / 2, y0 - 0.1, (c + d) / 2], [0, 0, 0], [b2 - a, 0.3, d - c]);
+        for (const [a, b2, c, d] of holeRect(fx - rw / 2 + 0.025, fx + rw / 2 - 0.025, fz - rd / 2 + 0.025, fz + rd / 2 - 0.025, hx0, hx1, hz0, hz1)) lb.add(BOX, 0xb88a5a, [(a + b2) / 2, y0 + 0.06, (c + d) / 2], [0, 0, 0], [b2 - a, 0.06, d - c]);
+        for (let k = -rw / 2 + 0.6; k < rw / 2; k += 0.6) {
+          const px = fx + k, za = fz - rd / 2 + 0.15, zb = fz + rd / 2 - 0.15;
+          if (px > hx0 && px < hx1) { if (hz0 - za > 0.05) lt.add(BOX, 0xa87a4a, [px, y0 + 0.095, (za + hz0) / 2], [0, 0, 0], [0.03, 0.01, hz0 - za]); if (zb - hz1 > 0.05) lt.add(BOX, 0xa87a4a, [px, y0 + 0.095, (hz1 + zb) / 2], [0, 0, 0], [0.03, 0.01, zb - hz1]); }
+          else lt.add(BOX, 0xa87a4a, [px, y0 + 0.095, fz], [0, 0, 0], [0.03, 0.01, rd - 0.3]);
+        }
+        for (let k = -rd / 2 + 1.2; k < rd / 2; k += 2.4) for (let m = -rw / 2 + 0.3 + ((k * 7) % 1.2 + 1.2) % 1.2; m < rw / 2 - 0.3; m += 2.4) if (!inHole(fx + m, fz + k, 0.3)) lt.add(BOX, 0xa87a4a, [fx + m, y0 + 0.095, fz + k], [0, 0, 0], [0.57, 0.01, 0.03]);
+        // 벽: 뒤 · 옆 (벽지 + 세로 줄무늬 + 판벽 + 걸레받이 + 몰딩 + 천장 띠) / 앞은 낮은 턱
+        const wallF = (ax, az, lw, ld, nx, nz) => {
+          lb.add(BOX, paper, [ax, y0 + RH / 2, az], [0, 0, 0], [lw, RH, ld]);
+          const o = T / 2 + 0.012, along = lw > ld, L = Math.max(lw, ld);
+          for (let t = -L / 2 + 0.5; t < L / 2; t += 0.5) lt.add(BOX, paper2, [ax + (along ? t : 0) + nx * o, y0 + 2.2 + (RH - 3.4) / 2, az + (along ? 0 : t) + nz * o], [0, 0, 0], along ? [0.12, RH - 1.35, 0.01] : [0.01, RH - 1.35, 0.12]);
+          lb.add(BOX, S0.trim, [ax + nx * (o + 0.01), y0 + 0.55, az + nz * (o + 0.01)], [0, 0, 0], along ? [L - 0.1, 1.1, 0.04] : [0.04, 1.1, L - 0.1]);
+          lb.add(BOX, S0.chimney, [ax + nx * (o + 0.05), y0 + 0.13, az + nz * (o + 0.05)], [0, 0, 0], along ? [L - 0.1, 0.16, 0.08] : [0.08, 0.16, L - 0.1]);
+          lb.add(BOX, S0.trim, [ax + nx * (o + 0.04), y0 + 1.13, az + nz * (o + 0.04)], [0, 0, 0], along ? [L - 0.1, 0.06, 0.08] : [0.08, 0.06, L - 0.1]);
+          lb.add(BOX, S0.trim, [ax + nx * (o + 0.05), y0 + RH - 0.08, az + nz * (o + 0.05)], [0, 0, 0], along ? [L, 0.16, 0.1] : [0.1, 0.16, L]);
+        };
+        wallF(fx, fz1, rw + T, T, 0, -1); wallF(fx0, fz, T, rd + T, 1, 0); wallF(fx1, fz, T, rd + T, -1, 0);
+        lb.add(BOX, S0.trim, [fx, y0 + 0.3, fz0], [0, 0, 0], [rw + T, 0.6, T]); lb.add(BOX, S0.chimney, [fx, y0 + 0.63, fz0], [0, 0, 0], [rw + T + 0.04, 0.08, T + 0.06]);
+        // 뒷벽 창문 (창틀 · 창살 · 창턱 · 커튼 · 커튼봉 · 화분)
+        for (let t = -rw / 2 + 4.2; t <= rw / 2 - 4.2; t += 4.2) {
+          const wz = fz1 - T / 2;
+          glow.add(BOX, 0xffd8a8, [fx + t, y0 + 2.0, wz - 0.02], [0, 0, 0], [1.3, 1.2, 0.02]);
+          for (const sg of [-1, 1]) { lt.add(BOX, 0xf4f0e8, [fx + t + sg * 0.68, y0 + 2.0, wz - 0.05], [0, 0, 0], [0.08, 1.36, 0.06]); lt.add(BOX, 0xf4f0e8, [fx + t, y0 + 2.0 + sg * 0.64, wz - 0.05], [0, 0, 0], [1.44, 0.08, 0.06]); lt.add(BOX, S0.rug, [fx + t + sg * 0.88, y0 + 1.95, wz - 0.1], [0, 0, 0], [0.32, 1.6, 0.06]); }
+          lt.add(BOX, 0xf4f0e8, [fx + t, y0 + 2.0, wz - 0.045], [0, 0, 0], [0.06, 1.2, 0.02]); lt.add(BOX, 0xf4f0e8, [fx + t, y0 + 2.0, wz - 0.045], [0, 0, 0], [1.3, 0.06, 0.02]);
+          lt.add(BOX, 0xd8c8a8, [fx + t, y0 + 1.36, wz - 0.12], [0, 0, 0], [1.5, 0.06, 0.2]); lt.add(BOX, 0x8a6a4a, [fx + t, y0 + 2.8, wz - 0.12], [0, 0, 0], [2.3, 0.05, 0.05]);
+          lt.add(CYL, 0xc86a4a, [fx + t + 0.45, y0 + 1.47, wz - 0.13], [0, 0, 0], [0.13, 0.16, 0.13]); lt.add(BALL, pick(FLOWER_COLORS), [fx + t + 0.45, y0 + 1.62, wz - 0.13], [0, 0, 0], [0.16, 0.16, 0.16]);
+        }
+        // 가구 (층마다 다르게): 러그 3겹은 공통
+        const kind2 = ROOMS[(f - 1) % ROOMS.length];
+        lt.add(BOX, S0.rug, [fx, y0 + 0.105, fz - rd * 0.05], [0, 0, 0], [rw * 0.36, 0.02, rd * 0.3]); lt.add(BOX, S0.rug2, [fx, y0 + 0.118, fz - rd * 0.05], [0, 0, 0], [rw * 0.3, 0.02, rd * 0.24]); lt.add(BOX, S0.rug, [fx, y0 + 0.13, fz - rd * 0.05], [0, 0, 0], [rw * 0.2, 0.02, rd * 0.14]);
+        const P = (geo, c, px, py, pz, sx, sy, sz, ry = 0) => lb.add(geo, c, [px, y0 + 0.09 + py, pz], [0, ry, 0], [sx, sy, sz]);
+        // 윗층 가구 E 상호작용 (놓는 가구와 같은 'furn' 방식): 서는 자리(ax, az) · 앉는 자리(seat)
+        const FU = (furn, ax, az, mx, mz) => shops.push({ kind: 'furn', house: h, furn, title: furn.title, group: wallMesh, pos: new THREE.Vector3(ax, y0, az), promptAt: new THREE.Vector3(mx ?? ax, y0 + 2.0, mz ?? az), r: 1.0 });
+        const seatAt = (px, pz, ry, stx, stz) => ({ seat: { x: px, y: y0 + 0.1, z: pz, ry }, stand: [stx, stz] });
+        const MSG = (title, msgs) => ({ type: 'msg', title, msgs });
+        if (kind2 === '침실') { // 큰 침대 (머리판 · 매트리스 · 이불 · 베개 2 · 다리) + 협탁 2 + 스탠드 + 옷장 (문 2 · 손잡이)
+          const bx = fx, bz = fz1 - 2.2;
+          P(BOX, 0x6a3a22, bx, 0.25, bz, 2.4, 0.3, 2.6); P(BOX, 0x5a2e18, bx, 0.75, bz + 1.25, 2.5, 1.3, 0.14);
+          P(BOX, 0xf4efe6, bx, 0.5, bz, 2.3, 0.22, 2.5); P(BOX, S0.blanket, bx, 0.63, bz - 0.35, 2.32, 0.1, 1.7);
+          for (const s of [-1, 1]) { P(BOX, 0xffffff, bx + s * 0.55, 0.68, bz + 0.85, 0.85, 0.16, 0.45); P(BOX, 0x5a2e18, bx + s * 1.1, 0.06, bz - 1.2, 0.12, 0.12, 0.12); P(BOX, 0x7a4a2a, bx + s * 1.8, 0.3, bz + 0.9, 0.6, 0.6, 0.55); P(BOX, 0xd8b040, bx + s * 1.8, 0.4, bz + 0.62, 0.12, 0.04, 0.03); P(CYL, 0xd8c8a0, bx + s * 1.8, 0.75, bz + 0.9, 0.12, 0.3, 0.12); P(CONE, 0xfff0d0, bx + s * 1.8, 1.0, bz + 0.9, 0.36, 0.26, 0.36); }
+          FU({ type: 'bed', title: '큰 침대 · 자기 (아침까지)' }, bx, bz - 2.0, bx, bz);
+          FU(MSG('스탠드 · 켜 보기', ['스탠드를 딸깍 켰다 껐어요.', '은은한 불빛이 침대를 비춰요.']), bx + 1.8, bz - 0.2, bx + 1.8, bz + 0.9);
+                    const wx = fx0 + 1.2, wz = fz - 1.6; // 계단 구멍(왼쪽 뒤)과 안 겹치게 앞쪽에
+          P(BOX, 0x7a4a2a, wx, 1.1, wz, 0.7, 2.2, 1.6); for (const s of [-1, 1]) { P(BOX, 0x8a5a32, wx + 0.36, 1.1, wz + s * 0.39, 0.03, 2.0, 0.74); P(BOX, 0xd8b040, wx + 0.39, 1.1, wz + s * 0.08, 0.04, 0.2, 0.04); }
+          FU(MSG('큰 옷장 · 열어 보기', ['옷장 속에 따뜻한 스웨터가 걸려 있어요.', '비옷과 장화가 나란히 있어요. 비 오는 날 낚시용!']), wx + 1.1, wz, wx, wz);
+        } else if (kind2 === '서재') { // 책장 3개 (칸 4 · 책 색색) + 책상 · 의자 · 스탠드 · 지구본
+          for (let k = -1; k <= 1; k++) { const bx = fx + k * 2.0, bz = fz1 - 0.6; P(BOX, 0x5a3a22, bx, 1.1, bz, 1.8, 2.2, 0.5); for (let r = 0; r < 4; r++) { P(BOX, 0x4a2e18, bx, 0.25 + r * 0.55, bz - 0.04, 1.7, 0.04, 0.42); for (let b = 0; b < 9; b++) P(BOX, pick([0xb83a3a, 0x3a6ab8, 0x3a9a5a, 0xd8b040, 0x8a4ab8, 0xf4efe6]), bx - 0.75 + b * 0.18, 0.47 + r * 0.55, bz - 0.06, 0.14, 0.38 + (b % 3) * 0.04, 0.3); } }
+          const dx = fx - 2, dz = fz - 1; P(BOX, 0x6a3a22, dx, 0.75, dz, 2.0, 0.08, 1.0); for (const [ox, oz] of [[-0.9, -0.4], [0.9, -0.4], [-0.9, 0.4], [0.9, 0.4]]) P(BOX, 0x5a2e18, dx + ox, 0.37, dz + oz, 0.08, 0.74, 0.08);
+          P(BOX, 0x8a4a2a, dx, 0.45, dz - 0.9, 0.6, 0.08, 0.6); P(BOX, 0x8a4a2a, dx, 0.8, dz - 1.15, 0.6, 0.7, 0.08); P(CYL, 0x2a2a2a, dx + 0.7, 1.0, dz + 0.3, 0.06, 0.45, 0.06); P(CONE, 0x3a8a5a, dx + 0.7, 1.25, dz + 0.3, 0.3, 0.2, 0.3);
+          P(BALL, 0x3a8ad8, dx - 0.6, 0.98, dz + 0.2, 0.36, 0.36, 0.36); P(CYL, 0xd8b040, dx - 0.6, 0.82, dz + 0.2, 0.2, 0.06, 0.2);
+          for (let k = -1; k <= 1; k++) FU({ type: 'book', title: '책장 · 책 읽기' }, fx + k * 2.0, fz1 - 1.6, fx + k * 2.0, fz1 - 0.6);
+          FU({ type: 'sofa', title: '책상 의자 · 앉기', sitMsg: '책상 의자에 앉았어요. E 또는 방향키로 일어나요.', ...seatAt(dx, dz - 0.9, Math.PI, dx + 1.2, dz - 1.6) }, dx, dz - 1.7, dx, dz - 0.9);
+          FU(MSG('지구본 · 돌려 보기', ['지구본을 빙글 돌렸어요. 손가락이 멈춘 곳은… 바다!']), dx - 0.6, dz + 1.1, dx - 0.6, dz + 0.2);
+        } else { // 거실: 큰 소파 (팔걸이 · 쿠션 3) + 탁자 + 피아노 + 화분 2
+          const sx = fx, sz = fz1 - 1.4;
+          P(BOX, S0.sofa, sx, 0.35, sz, 3.2, 0.4, 1.0); P(BOX, S0.sofa, sx, 0.8, sz + 0.4, 3.2, 0.7, 0.24);
+          for (const s of [-1, 1]) P(BOX, S0.sofa, sx + s * 1.65, 0.55, sz, 0.24, 0.6, 1.0);
+          for (let k = -1; k <= 1; k++) P(BOX, new THREE.Color(S0.sofa).multiplyScalar(0.85).getHex(), sx + k * 1.0, 0.62, sz - 0.05, 0.9, 0.14, 0.8);
+          P(BOX, 0x6a3a22, sx, 0.4, sz - 1.6, 1.6, 0.06, 0.9); for (const [ox, oz] of [[-0.7, -0.35], [0.7, -0.35], [-0.7, 0.35], [0.7, 0.35]]) P(BOX, 0x5a2e18, sx + ox, 0.2, sz - 1.6 + oz, 0.07, 0.4, 0.07);
+          FU({ type: 'sofa', title: '큰 소파 · 앉기', ...seatAt(sx, sz - 0.05, 0, sx + 2.4, sz - 0.7) }, sx, sz - 0.95, sx, sz);
+          FU({ type: 'tea', title: '탁자 · 차 마시기' }, sx + 1.4, sz - 1.6, sx, sz - 1.6);
+          const px = fx1 - 1.6, pz = fz; P(BOX, 0x1a1a1e, px, 0.6, pz, 1.0, 1.2, 1.6); P(BOX, 0xf4f4f0, px - 0.52, 0.85, pz, 0.06, 0.06, 1.4); for (let k = 0; k < 7; k++) P(BOX, 0x1a1a1e, px - 0.53, 0.89, pz - 0.6 + k * 0.2, 0.05, 0.04, 0.08);
+          FU({ type: 'piano', title: '피아노 · 연주하기', ...seatAt(px - 1.15, pz, -Math.PI / 2, px - 2.0, pz + 0.8) }, px - 1.9, pz, px, pz);
+          for (const s of [-1, 1]) { const qx = fx0 + 0.9, qz = fz - 1.8 + s * 1.0; /* 계단 구멍 앞쪽 */ P(CYL, 0xb86a3a, qx, 0.3, qz, 0.6, 0.6, 0.6); for (let k = 0; k < 6; k++) P(BALL, pick([0x3a8a3a, 0x4aa04a]), qx + (rnd() - 0.5) * 0.4, 0.9 + rnd() * 0.3, qz + (rnd() - 0.5) * 0.4, 0.35, 0.35, 0.35); FU(MSG('화분 · 물 주기', ['화분에 물을 줬어요. 잎이 싱그러워요.']), qx + 0.9, qz, qx, qz); }
+        }
+        // 벽 충돌 (앞 턱도 막혀 있어요: 윗층엔 나가는 문이 없어요)
+        line(fx0, fz1, fx1, fz1); line(fx0, fz0, fx0, fz1); line(fx1, fz0, fx1, fz1); line(fx0, fz0, fx1, fz0);
+        const L = { home: h, level: f, name: `${name} ${f + 1}층`, x: fx, z: fz, x0: fx0, x1: fx1, z0: fz0, z1: fz1, rw, rd, floorY: y0 + 0.09, freeCam: h.freeCam, exitAt: null };
+        L.down = stairsDown(lb, fx0 + 1.6, fz1 - 0.35, y0 + 0.09);
+        if (f < floors - 1) L.up = stairsUp(lb, fx1 - 1.6, fz1 - 0.35, y0 + 0.09);
+        if (h.freeCam) camWalls(fx, fz, rw, rd);
+        h.levels.push(L);
+      }
+      lb.build(scene, { cast: false }); lt.build(scene, { cast: false });
+    }
     houses.push(h);
     // 문 앞 (사기 / 들어가기 / 디자인) · 어항 앞 (물고기 넣고 빼기)
     shops.push({ kind: 'house', house: h, title: `${name} · ${fmtMoney(price)}`, group: wallMesh, pos: new THREE.Vector3(x, y0, z0 - 1.6), promptAt: new THREE.Vector3(x, y0 + 3.6, z0 - 1.2) });
@@ -1161,6 +1325,7 @@ export function buildSeaWorld(ctx) {
   glow.build(scene, { cast: false, material: glowMat }); // 창문·등불은 빛나는 재질로
 
   // 방 안인지 (main.js 가 걷기·바닥 높이에 써요)
-  const inRoom = (qx, qz) => qz < -300 && houses.some((h) => qx > h.x0 - 0.2 && qx < h.x1 + 0.2 && qz > h.z0 - 1.2 && qz < h.z1 + 0.2);
-  return { houses, houseBlockers, zEdge, islands: islandInfo, things, jungleFx, trunks, inRoom };
+  // 방 안인지 (윗층 방도): main.js 가 걷기 · 바닥 높이에 써요
+  const inRoom = (qx, qz) => qz < -300 && houses.some((h) => (h.levels || [h]).some((L) => qx > L.x0 - 0.2 && qx < L.x1 + 0.2 && qz > L.z0 - 1.2 && qz < L.z1 + 0.2));
+  return { houses, houseBlockers, roomBlockers, zEdge, islands: islandInfo, things, jungleFx, trunks, inRoom };
 }

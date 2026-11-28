@@ -304,12 +304,10 @@ FISH.push(
 );
 
 // =========== 루비 신전 성소의 보스 (zone: 'boss') — 봉인을 풀면 신전 문이 열리고, 성소 연못에서만 한 번씩 나와요 ===========
-//  보스를 낚아야 루비 공방에서 그 낚싯대를 살 수 있어요. 일반 낚시로는 절대 안 나와요 (박물관 어항도 없어요)
+//  보스는 한 마리뿐. 낚으면 성소 안에서 신전 낚싯대 2개(홍염 · 왕관)를 살 수 있어요. 일반 낚시로는 절대 안 나와요 (박물관 어항도 없어요)
 FISH.push(
-  { name: '성소의 홍염 수호룡', zone: 'boss', boss: 's1', rarity: 'mythic', w: [4000, 6000], perKg: 3000, huge: true,
-    look: { rk: 'wyrm', L: 2.2, h: 0.5, w: 0.5, color: 0xd8202a, belly: 0xffd890, fin: 0xff8a1a, pc: 0xffd84a, gem: 0xfff0a0, iris: 0xffffff, glow: [0xfff0a0, 0xff8a1a], size: 8.4 } },
-  { name: '루비 왕관의 군주', zone: 'boss', boss: 's2', rarity: 'mythic', w: [9000, 12000], perKg: 3000, huge: true,
-    look: { rk: 'phoenix', L: 1.0, h: 0.42, w: 0.36, color: 0x6a0a1a, belly: 0xffe0a0, fin: 0xffd84a, pc: 0xff2a4a, gem: 0xffffff, iris: 0xffd84a, glow: [0xffffff, 0xffd84a, 0xff2a4a], size: 10.5 } }
+  { name: '성소의 홍염 수호룡', zone: 'boss', boss: true, rarity: 'mythic', w: [4000, 6000], perKg: 3000, huge: true,
+    look: { rk: 'wyrm', L: 2.2, h: 0.5, w: 0.5, color: 0xd8202a, belly: 0xffd890, fin: 0xff8a1a, pc: 0xffd84a, gem: 0xfff0a0, iris: 0xffffff, glow: [0xfff0a0, 0xff8a1a], size: 8.4 } }
 );
 
 // 물고기가 사는 곳: 'lake'(큰 호수·개울) 또는 'mountain'(산 위 연못)

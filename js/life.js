@@ -197,6 +197,49 @@ export function setupLife(ctx) {
     piano: ['piano_up'], fire: ['fireplace']
   };
   const useOf = (fid) => Object.keys(USE).find((k) => USE[k].includes(fid));
+  // 나머지 가구도 전부 E 로 만져 볼 수 있어요: [버튼 글자, 멘트들, 소리('tune' 노래 · 'beep' 오락기 · 'chime' 기본)]
+  //  (러그처럼 바닥에 까는 것 · 벽에 거는 것은 빼요). 조명은 불 켜기/끄기 (빛나는 블록을 켰다 껐다)
+  const LAMPS = ['lamp_stand', 'candles', 'lamp_mushroom', 'lamp_jelly', 'lamp_star', 'lantern_shell', 'rainbow_lamp', 'pumpkin_lamp'];
+  const FURN_MSG = {
+    desk: ['공부하기', ['책상에 앉아 낚시 일기를 썼어요.', '물고기 그림을 그려 봤어요. 꽤 닮았어요!', '오늘 잡은 물고기를 공책에 정리했어요.']],
+    petbed: ['쓰다듬기', ['폭신한 동물 쿠션이에요. 펫이 좋아할 것 같아요.', '쿠션을 톡톡 두드려 정리했어요.']],
+    drawer: ['열어 보기', ['서랍 속에 낚싯줄 뭉치가 가지런히 있어요.', '꽃무늬 손수건이 곱게 개켜져 있어요.']],
+    wardrobe: ['열어 보기', ['옷장 속에 따뜻한 스웨터가 걸려 있어요.', '비옷과 장화가 나란히 있어요. 비 오는 날 낚시용!']],
+    shelf_plants: ['물 주기', ['선반 화분들에 물을 줬어요. 잎이 반짝여요.']],
+    chest_storage: ['열어 보기', ['보물상자 속엔 추억이 담긴 조개껍데기가 가득해요.', '끼익… 오래된 지도 한 장이 들어 있어요.']],
+    plant_monstera: ['물 주기', ['몬스테라에 물을 줬어요. 잎이 싱그러워요.']],
+    cactus: ['물 주기', ['선인장엔 물을 조금만! 꽃이 활짝 웃는 것 같아요.']],
+    sunflower: ['물 주기', ['해바라기에 물을 줬어요. 창 쪽으로 고개를 돌려요.']],
+    bonsai: ['다듬기', ['작은 분재 가지를 조심조심 다듬었어요.']],
+    vase_flowers: ['향기 맡기', ['꽃향기가 은은하게 퍼져요.']],
+    cherry_pot: ['물 주기', ['벚꽃 화분에 물을 줬어요. 꽃잎이 살랑 떨어져요.']],
+    trophy_fish: ['구경하기', ['반짝이는 물고기 트로피예요. 언젠가 더 큰 걸 잡을 거예요!']],
+    ship_model: ['구경하기', ['정교한 돛단배 모형이에요. 돛이 바람을 머금은 것 같아요.']],
+    globe: ['돌려 보기', ['지구본을 빙글 돌렸어요. 손가락이 멈춘 곳은… 바다!']],
+    teddy: ['안아 주기', ['커다란 곰인형을 꼭 안았어요. 포근해요.']],
+    clock: ['시계 보기', ['똑딱똑딱… 괘종시계 소리가 마음을 편하게 해요.']],
+    painting: ['감상하기', ['노을 지는 호수 그림이에요. 창밖 풍경이랑 똑같아요.']],
+    mirror: ['거울 보기', ['거울 속의 내가 오늘도 멋져요!']],
+    shell_deco: ['구경하기', ['조개를 귀에 대 보니 파도 소리가 들려요.']],
+    tank_mini: ['먹이 주기', ['작은 어항에 먹이를 톡톡. 물고기들이 몰려와요.']],
+    dragon_figure: ['구경하기', ['정글 용 피규어예요. 눈이 반짝이는 것 같아요.']],
+    fridge: ['열어 보기', ['냉장고에 시원한 과일 주스가 있어요. 꿀꺽!', '어제 남은 생선구이가 있어요.']],
+    stove: ['요리하기', ['화덕에 생선을 노릇노릇 구웠어요. 냄새가 좋아요!']],
+    sink: ['손 씻기', ['뽀득뽀득 손을 씻었어요. 비린내 안녕!']],
+    arcade: ['오락하기', ['뿅뿅! 레트로 오락기 최고 점수를 노려 봐요.', '아깝다! 한 판만 더…'], 'beep'],
+    record: ['음악 듣기', ['레코드판을 걸었어요. 잔잔한 노래가 흘러요.'], 'tune'],
+    easel: ['그림 그리기', ['이젤에 노을 호수를 그려 봤어요.', '물감으로 황금 물고기를 그렸어요.']],
+    telescope_in: ['들여다보기', ['창가 망원경으로 보니 멀리 갈매기가 날아가요.', '밤이면 별도 잘 보일 것 같아요.']],
+    xmas_tree: ['구경하기', ['반짝반짝 트리 불빛이 예뻐요.']],
+    snowman_doll: ['쓰다듬기', ['눈사람 인형이 방긋 웃어요.']],
+    friend_frame: ['감상하기', ['친구들과 찍은 사진이에요. 그날 참 즐거웠어요.']],
+    friend_trophy: ['구경하기', ['우정 트로피예요. 함께라서 더 좋아요.']],
+    fish_statue: ['구경하기', ['황금 물고기 동상이 눈부셔요.']],
+    dex_shelf: ['도감 보기', ['물고기 도감이 빼곡해요. 다 채워 볼까요?']],
+    king_trophy: ['구경하기', ['낚시왕 트로피! 자랑스러워요.']],
+    gyotaku: ['감상하기', ['전설 물고기의 어탁이에요. 크기가 어마어마해요.']],
+    aurora_globe: ['흔들어 보기', ['스노우볼을 흔들자 오로라 빛 눈이 흩날려요.']]
+  };
   const useEntries = new Map(), useCols = new Map(); // houseId → [shops 항목], [충돌 원]
   function rebuildDecor(hid) {
     for (const { mesh } of decorMeshes.get(hid) || []) scene.remove(mesh);
@@ -224,7 +267,7 @@ export function setupLife(ctx) {
       const ax = hx >= hz ? sx : fx, az = hx >= hz ? sz : fz;
       const n = Math.max(1, Math.round(long / r) + 1);
       for (let k = 0; k < n; k++) { const t = n === 1 ? 0 : -long + (2 * long * k) / (n - 1); const c = { x: cx + ax * t, z: cz + az * t, r }; colliders.push(c); useCols.get(hid).push(c); }
-      const use = useOf(d.f);
+      const use = useOf(d.f) || (LAMPS.includes(d.f) ? 'lamp' : FURN_MSG[d.f] ? 'msg' : null);
       if (!use) continue;
       const at = [cx + fx * (hz + 0.75), cz + fz * (hz + 0.75)];
       let furn;
@@ -233,6 +276,8 @@ export function setupLife(ctx) {
       else if (use === 'book') furn = { type: 'book', title: `${f.name} · 책 읽기` };
       else if (use === 'tea') furn = { type: 'tea', title: `${f.name} · 차 마시기` };
       else if (use === 'piano') furn = { type: 'piano', title: `${f.name} · 연주하기`, seat: { x: cx + fx * 0.62, y: h.floorY + 0.01, z: cz + fz * 0.62, ry: th }, stand: [cx + fx * 1.35, cz + fz * 1.35] };
+      else if (use === 'lamp') furn = { type: 'lamp', title: `${f.name} · 불 켜기/끄기`, glow: mesh.children.find((c) => c.material === glowFurnMat) };
+      else if (use === 'msg') { const m = FURN_MSG[d.f]; furn = { type: 'msg', title: `${f.name} · ${m[0]}`, msgs: m[1], snd: m[2] }; }
       else if (use === 'fire') {
         furn = { type: 'fire', title: `${f.name} · 불 켜기/끄기` };
         // 집의 일렁이는 불꽃을 이 벽난로 불 구멍으로 옮겨요

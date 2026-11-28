@@ -15,10 +15,11 @@ export const RUBY_LAGOON = { x: RUBY.x + 24, z: RUBY.z + 4, rx: 9.5, rz: 7, y: 0
 export const TEMPLE = { x: RUBY.x - 4, z: RUBY.z + 22 };              // 루비 신전 (섬 남쪽 언덕)
 export const DOCK = { x: RUBY.x, z: RUBY.z - RUBY.r - 0.5 };           // 북쪽 선착장 (큰 바다 쪽)
 // 봉인: 어떤 물고기를 어떤 이로치로 몇 마리 바쳐야 하는지
-//  봉인을 풀면 신전 문이 열리고, 성소 연못에서 보스(boss)를 낚아야 그 낚싯대를 살 수 있어요
+//  봉인 2개를 모두 풀면 신전 문이 열리고, 성소 연못에서 보스(한 마리)를 낚으면 성소 안에서 신전 낚싯대 2개를 팔아요
+export const RUBY_BOSS = '성소의 홍염 수호룡';
 export const SEALS = [
-  { id: 's1', name: '홍염의 봉인', fish: '홍염 날개어', mut: '다크', need: 1, rod: '루비 신전의 홍염 낚싯대', boss: '성소의 홍염 수호룡' },
-  { id: 's2', name: '왕관의 봉인', fish: '홍옥 바다용', mut: '핏빛', need: 1, rod: '루비 왕관 낚싯대', boss: '루비 왕관의 군주' }
+  { id: 's1', name: '홍염의 봉인', fish: '홍염 날개어', mut: '다크', need: 1, rod: '루비 신전의 홍염 낚싯대', boss: RUBY_BOSS },
+  { id: 's2', name: '왕관의 봉인', fish: '홍옥 바다용', mut: '핏빛', need: 1, rod: '루비 왕관 낚싯대', boss: RUBY_BOSS }
 ];
 
 const smooth = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
@@ -414,8 +415,8 @@ export function buildRuby(ctx) {
   const sellShop = shopBuilding(SHOP_S, '루비 판매점', 'sell', 0xf2e6de);
   // 공방 앞 전시대 5개 자리 (main.js 가 낚싯대를 세워서 돌려요)
   const stands = [];
-  for (let i = 0; i < 5; i++) {
-    const sx = workshop.x + [-6.6, -4.4, -2.2, 2.2, 4.4][i], sz = workshop.front - 4.2, sy = H(sx, sz); // 가운데는 문으로 가는 길이라 비워요
+  for (let i = 0; i < 3; i++) { // 공방 낚싯대 3개 (신전 낚싯대 2개는 성소에서 팔아요)
+    const sx = workshop.x + [-4.4, -2.2, 2.6][i], sz = workshop.front - 4.2, sy = H(sx, sz); // 가운데는 문으로 가는 길이라 비워요
     deco.add(BOX, 0x6a3a36, [sx, sy + 0.1, sz], [0, 0, 0], [1.0, 0.2, 1.0]);
     deco.add(CYL, 0xe8d8d0, [sx, sy + 0.5, sz], [0, 0, 0], [0.7, 0.6, 0.7]);
     shiny.add(CYL, 0xd8b040, [sx, sy + 0.82, sz], [0, 0, 0], [0.82, 0.06, 0.82]);
@@ -468,7 +469,7 @@ export function buildRuby(ctx) {
         s.ringM.emissiveIntensity = open ? 0.2 : 1.3;
         s.open = open;
         if (open) openN++;
-        if (!(save.ruby.boss && save.ruby.boss[s.seal.id])) pending = true;
+        if (!save.ruby.bossDone) pending = true;
       }
       const allOpen = openN === sealSpots.length; // 봉인 2개가 모두 풀려야 문이 열려요
       fx.lock.visible = !allOpen; fx.openGlow.visible = allOpen; fx.beam.visible = allOpen && pending;

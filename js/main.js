@@ -12,10 +12,12 @@ import { buildSeaWorld, HOUSE_STYLES, DecoBatch } from './seaworld.js';
 import { buildMuseum, cleanMuseum, MUSEUM_REWARD } from './museum.js';
 import { buildRuby, rubyHeight, templeGround, RUBY, RUBY_SEA, RUBY_STRAIT, RUBY_LAGOON, SEALS, DOCK as RUBY_DOCK } from './ruby.js';
 import { buildRubyRod } from './rubyrods.js';
+import { fmtMoney } from './money.js';
+import { buildShrine, SHRINE_POOL } from './shrine.js';
 import { setupLife, cleanLife } from './life.js';
 import { getSeason } from './seasons.js';
 import { cloudEnabled, startCloud, signIn, signOutCloud, loadCloud, saveCloud, watchHouses, claimHouse, setHouseStyleCloud, releaseHouse } from './cloud.js';
-import { RARITY, FISH, MUTATIONS, rarityOdds, rollFish, updateFishFx, findFish, mutList, mutKey, priceOf, fmtKg, makeFishModel, fishScale, zoneOf as fishZone } from './fish.js';
+import { RARITY, FISH, MUTATIONS, rarityOdds, rollFish, updateFishFx, findFish, mutList, mutKey, priceOf, fmtKg, makeFishModel, fishScale, zoneOf as fishZone, makeBossCatch } from './fish.js';
 
 // 글씨체(주아체)를 먼저 불러와요. 이름표·간판을 그림으로 그릴 때 이 글씨체가 있어야 예뻐요 (최대 2.5초만 기다려요)
 try { await Promise.race([Promise.all([document.fonts.load('40px "Jua"'), document.fonts.load('20px "Gowun Dodum"')]), new Promise((r) => setTimeout(r, 2500))]); } catch (_) {}
@@ -177,6 +179,8 @@ WATERS.push(JUNGLE_POND);
 // 루비 섬 안의 루비 호수 (전부 얕아서 걸어 들어가요) — 루비 공방 낚싯대로만 낚여요
 const RUBY_POND = { ...RUBY_LAGOON, zone: 'ruby', ruby: true, lagoon: true, name: '루비 호수', luck: 0.08, biteMul: 1.45, pad: 0.3 };
 WATERS.push(RUBY_POND);
+// 루비 신전 성소의 보스 연못 (맵 북쪽 아주 먼 성소 방 안) — shrine.js
+WATERS.push({ x: SHRINE_POOL.x, z: SHRINE_POOL.z, rx: SHRINE_POOL.r, rz: SHRINE_POOL.r, y: 0.14, zone: 'ruby', ruby: true, boss: true, lagoon: true, name: '성소의 연못', luck: 0.1, biteMul: 0.7, pad: 0, noFoam: true, maxSeg: 28 });
 WATERS.push(SEA);
 // 큰 바다 남쪽으로 넓힌 루비 바다 + 이어 주는 해협 (보트로 갈 수 있어요). 물가 거품은 겹치는 곳을 잘라 내요
 WATERS.push({ ...RUBY_STRAIT, y: 0.1, zone: 'sea', sea: true, strait: true, name: '루비 해협', luck: 0.03, biteMul: 1.15, pad: 0, noFoam: true, maxSeg: 24 });
@@ -424,6 +428,39 @@ const starGeo = new THREE.BufferGeometry();
 }
 const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
 scene.add(stars);
+// ---------- 하늘 돔: 단색 배경 대신, 지평선(배경색) → 머리 위(더 깊은 색)로 물들고, 해 둘레가 은은하게 빛나요 ----------
+//  지평선 색은 scene.background 를 그대로 써요 (비 · 피의 날 덧칠도 같이 따라가요). 카메라를 따라다녀요
+const skyZen = new THREE.Color(0x5a6ab8);
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(190, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunCol: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 0.2, -1) }, sunAmt: { value: 1 }, band: { value: 0.3 } },
+  vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position.z = gl_Position.w * 0.99999; }',
+  fragmentShader: `uniform vec3 top; uniform vec3 hor; uniform vec3 sunCol; uniform vec3 sunDir; uniform float sunAmt; uniform float band; varying vec3 vDir;
+    void main(){
+      vec3 d = normalize(vDir); float h = d.y;
+      vec3 c = mix(hor, top, pow(smoothstep(0.0, 0.85, h), 0.75));
+      c = mix(c, hor * 0.82, smoothstep(0.0, -0.25, h));                 // 지평선 아래는 살짝 어둡게
+      float s = max(dot(d, normalize(sunDir)), 0.0);
+      c += sunCol * (pow(s, 6.0) * 0.28 + pow(s, 48.0) * 0.45) * sunAmt;  // 해 둘레 빛무리
+      c += sunCol * band * exp(-abs(h) * 14.0) * 0.22;                    // 지평선 노을 띠
+      gl_FragColor = vec4(c, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`
+}));
+skyDome.renderOrder = -10; skyDome.frustumCulled = false; skyDome.userData.dynamic = true;
+scene.add(skyDome);
+function updateSkyDome() {
+  const u = skyDome.material.uniforms;
+  skyDome.position.copy(camera.position);
+  u.hor.value.copy(scene.background);
+  u.top.value.copy(skyZen);
+  if (document.body.classList.contains('bloodDay')) u.top.value.lerp(new THREE.Color(0x1a0206), 0.7);
+  u.sunCol.value.copy(halo.material.color);
+  u.sunDir.value.copy(sun.position).sub(camera.position).normalize();
+  u.sunAmt.value = Math.min(1, halo.material.opacity * 6) * (sun.visible ? 1 : 0.2);
+  u.band.value = phaseName() === '노을' || phaseName() === '새벽' ? 1 : 0.25;
+}
 
 // 부딪히는 물건들 (원 모양으로 막아요)
 const colliders = [];
@@ -1208,25 +1245,33 @@ person.position.set(0, -0.08, 8.2);
 
 // 머리 위 숫자 (잡은 물고기 마리 수)
 const tagCanvas = document.createElement('canvas');
-tagCanvas.width = 256; tagCanvas.height = 128;
+tagCanvas.width = 512; tagCanvas.height = 192;
+let myTagName = ''; // 멀티에 들어가 있으면 내 이름 (내 머리 위에도 보여요)
 const tagTex = new THREE.CanvasTexture(tagCanvas);
 tagTex.colorSpace = THREE.SRGBColorSpace;
 const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, transparent: true, fog: false, depthWrite: false }));
-tag.scale.set(0.75, 0.375, 1);
+tag.scale.set(1.0, 0.375, 1);
 tag.position.set(0, 2.2, 0);
 tag.renderOrder = 10; // 물보다 나중에 그려서 안 가려지게
 person.add(tag);
 function drawTag(n) {
   const c = tagCanvas.getContext('2d');
-  c.clearRect(0, 0, 256, 128);
-  c.font = '86px "Jua", "Malgun Gothic", sans-serif';
+  c.clearRect(0, 0, 512, 192);
   c.textAlign = 'center';
   c.textBaseline = 'middle';
-  c.lineWidth = 12;
   c.strokeStyle = 'rgba(0,0,0,0.8)';
-  c.strokeText(String(n), 128, 66);
-  c.fillStyle = '#ffffff';
-  c.fillText(String(n), 128, 66);
+  const num = Number(n).toLocaleString('en-US');
+  if (myTagName) { // 멀티: 다른 사람 이름표와 똑같이 위에 이름, 아래에 잡은 수
+    tag.scale.set(1.5, 0.56, 1); tag.position.y = 2.35;
+    c.lineWidth = 10; c.font = '54px "Jua", "Malgun Gothic", sans-serif';
+    c.strokeText(myTagName, 256, 50); c.fillStyle = '#ffe9a0'; c.fillText(myTagName, 256, 50);
+    c.font = '80px "Jua", "Malgun Gothic", sans-serif';
+    c.strokeText(num, 256, 135); c.fillStyle = '#ffffff'; c.fillText(num, 256, 135);
+  } else {
+    tag.scale.set(1.0, 0.375, 1); tag.position.y = 2.2;
+    c.lineWidth = 14; c.font = '120px "Jua", "Malgun Gothic", sans-serif';
+    c.strokeText(num, 256, 100); c.fillStyle = '#ffffff'; c.fillText(num, 256, 100);
+  }
   tagTex.needsUpdate = true;
 }
 
@@ -1293,26 +1338,42 @@ const RODS = [
   { name: '심해왕의 삼지창', shop: 'aurora', price: 70000, luck: 0.5, reel: 1.6, bite: 0.25, zone: 0.12, perk: '특기: 입질이 엄청 빨라요 (+300%)', style: 'trident',
     color: 0x0a1a3a, color2: 0x1a4a7a, grip: 0x3a2410, accent: 0xffd04a, reelC: 0xc8a030, rings: 7, metal: 0.7, rough: 0.2, glow: 0x3ad8ff, tip: 'trident', orbit: 0 },
   // ---- 정글섬 공방에서만 팔아요 (shop: 'jungle') — 정글 연못은 이 낚싯대로만 낚여요 ----
-  { name: '덩굴 낚싯대', shop: 'jungle', price: 2500000, luck: 0.7, reel: 1.8, bite: 0.32, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (정글 왕보다!)',
+  { name: '덩굴 낚싯대', shop: 'jungle', price: 1200000, luck: 0.7, reel: 1.8, bite: 0.32, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (석류석 낚싯대와 같아요!)',
     color: 0x3a5a22, color2: 0x6a8a3a, grip: 0x4a2a14, accent: 0xb8ff6a, reelC: 0x3a4a2a, rings: 0, metal: 0.1, rough: 0.7, glow: 0x6aff3a, tip: 'none', orbit: 4, style: 'vine' },
-  { name: '황금 신전 낚싯대', shop: 'jungle', price: 30000000, luck: 0.98, reel: 1.9, bite: 0.3, zone: 0.16, perk: '특기: 운이 제일 좋아요 (정글 왕보다!)',
+  { name: '황금 신전 낚싯대', shop: 'jungle', price: 30000000, luck: 0.98, reel: 1.9, bite: 0.3, zone: 0.16, perk: '특기: 운이 아주 좋아요 (정글 공방에서 제일!)',
     color: 0xc89a2a, color2: 0xffd84a, grip: 0x5a3a14, accent: 0x3affb0, reelC: 0xd8b040, rings: 0, metal: 0.85, rough: 0.2, glow: 0xffc83a, tip: 'none', orbit: 6, style: 'temple' },
-  { name: '정글 왕의 낚싯대', shop: 'jungle', price: 60000000, luck: 0.86, reel: 2.4, bite: 0.2, zone: 0.2, perk: '특기: 게이지·입질이 제일 빨라요',
+  { name: '정글 왕의 낚싯대', shop: 'jungle', price: 60000000, luck: 0.86, reel: 2.4, bite: 0.2, zone: 0.2, perk: '특기: 게이지·입질이 빨라요 (정글 공방에서 제일!)',
     color: 0x3a2a14, color2: 0xc8862a, grip: 0x1a0a04, accent: 0xffe23a, reelC: 0x0a2a1a, rings: 0, metal: 0.3, rough: 0.4, glow: 0xffa83a, tip: 'none', orbit: 10, style: 'king' },
   // ---- 루비 섬 루비 공방에서만 팔아요 (shop: 'ruby') — 루비 바다 · 루비 호수는 이 낚싯대로만 낚여요 ----
   //  가장 비싼 2개(seal)는 루비 신전의 봉인을 풀어야 살 수 있어요 (ruby.js SEALS) · 모양은 rubyrods.js
-  { name: '루비 낚싯대', shop: 'ruby', price: 200000000, luck: 1.05, reel: 2.2, bite: 0.24, zone: 0.22, perk: '특기: 루비 섬의 첫 낚싯대 · 홍옥이 나선으로 박혀 있어요',
+  { name: '루비 낚싯대', shop: 'ruby', price: 200000000, luck: 1.05, reel: 2.2, bite: 0.24, zone: 0.22, perk: '특기: 루비 물고기를 낚을 수 있는 첫 낚싯대 · 홍옥이 나선으로 박혀 있어요',
     color: 0x8a0a1a, color2: 0xd8203a, grip: 0x2a0a0e, accent: 0xd8b040, reelC: 0x3a0a12, rings: 0, metal: 0.5, rough: 0.25, glow: 0xff2a4a, tip: 'none', orbit: 4, style: 'ruby1' },
-  { name: '석류석 낚싯대', shop: 'ruby', price: 300000000, luck: 1.12, reel: 2.3, bite: 0.22, zone: 0.27, perk: '특기: 초록 칸이 아주 넓어요 · 석류석 수정이 자라나요',
+  { name: '석류석 낚싯대', shop: 'ruby', price: 300000000, luck: 1.12, reel: 2.3, bite: 0.22, zone: 0.27, perk: '특기: 초록 칸이 제일 넓어요 (덩굴 낚싯대와 같아요!) · 석류석 수정이 자라나요',
     color: 0x3a0a14, color2: 0x8a1a2a, grip: 0x1a0608, accent: 0xff6a7a, reelC: 0x2a0a10, rings: 0, metal: 0.3, rough: 0.35, glow: 0xff4a6a, tip: 'none', orbit: 5, style: 'ruby2' },
-  { name: '진홍 용비늘 낚싯대', shop: 'ruby', price: 450000000, luck: 1.2, reel: 2.55, bite: 0.19, zone: 0.22, perk: '특기: 게이지가 엄청 빨라요 · 루비 용왕의 비늘을 겹겹이',
+  { name: '진홍 용비늘 낚싯대', shop: 'ruby', price: 1350000000, luck: 1.2, reel: 2.55, bite: 0.19, zone: 0.22, perk: '특기: 게이지가 엄청 빨라요 · 홍옥 바다용의 비늘을 겹겹이',
     color: 0x5a0a14, color2: 0xb8182a, grip: 0x1a0a08, accent: 0xffc83a, reelC: 0x2a0a0e, rings: 0, metal: 0.45, rough: 0.3, glow: 0xff3a2a, tip: 'none', orbit: 0, style: 'ruby3' },
-  { name: '루비 신전의 홍염 낚싯대', shop: 'ruby', seal: 's1', price: 700000000, luck: 1.35, reel: 2.65, bite: 0.17, zone: 0.26, perk: '특기: 봉인된 신전의 불꽃 · 운과 입질이 모두 뛰어나요',
+  { name: '루비 신전의 홍염 낚싯대', shop: 'ruby', seal: 's1', price: 7700000000, luck: 1.35, reel: 2.65, bite: 0.17, zone: 0.26, perk: '특기: 봉인된 신전의 불꽃 · 운과 입질이 모두 뛰어나요',
     color: 0xf0e0d8, color2: 0xff6a3a, grip: 0x5a1a14, accent: 0xd8b040, reelC: 0xe8d8d0, rings: 0, metal: 0.55, rough: 0.2, glow: 0xff5a1a, tip: 'none', orbit: 6, style: 'ruby4' },
-  { name: '루비 왕관 낚싯대', shop: 'ruby', seal: 's2', price: 1000000000, luck: 1.55, reel: 2.9, bite: 0.14, zone: 0.28, perk: '특기: 세상에서 제일 좋은 낚싯대 · 모든 능력이 최고예요',
+  { name: '루비 왕관 낚싯대', shop: 'ruby', seal: 's2', price: 11000000000, luck: 1.55, reel: 2.9, bite: 0.14, zone: 0.26, perk: '특기: 운 · 게이지 · 입질이 모두 제일 좋아요',
     color: 0xd8b040, color2: 0xff2a4a, grip: 0x3a0a14, accent: 0xffe8a0, reelC: 0xd8b040, rings: 0, metal: 0.85, rough: 0.18, glow: 0xff2a4a, tip: 'none', orbit: 10, style: 'ruby5' }
 ];
 RODS.forEach((r) => (r.shop = r.shop || 'base')); // 표시 없는 건 아래 상점 낚싯대
+// 규칙: 초록 칸(zone)은 더 이상 늘리지 않아요 — 새 낚싯대도 ZONE_CAP(0.27)을 넘지 않게 잘라요
+//  (새 낚싯대를 넣으면 다른 낚싯대 특기 멘트의 '제일 ~' 이 아직 맞는지 꼭 다시 확인하기)
+// 루비 섬 주민 4명: 루비 물고기를 부탁하고, 갖다주면 아주 큰 보상 (평균 약 10억)
+//  kind: 부탁하는 물고기 희귀도 / mut: 이로치가 붙은 물고기여야 하는지 / base: 보상 가운데 값 (x0.6~1.4)
+const RUBY_NPCS = [
+  { id: 'lighthouse', name: '등대지기 홍 할멈', at: [6.5, 299], kind: ['common', 'uncommon'], base: 3e8, look: { skin: 0xe8c0a0, shirt: 0x8a2a2a, pants: 0x3a2a2a, boots: 0x2a1a1a, hair: 'long', hairColor: 0xe8e8e8, hat: 'bucket', hatColor: 0x5a1a1a },
+    lines: ['바닷바람이 짜지? 그래도 루비 바다 물고기는 달단다.', '젊은이, 부탁 하나 들어주겠나?'] },
+  { id: 'jeweler', name: '보석상 루비나', at: [-6, 312], kind: ['uncommon', 'rare'], base: 7e8, look: { skin: 0xf6d0b0, shirt: 0xd8203a, vest: 0xd8b040, vestPocket: 0xa8802a, pants: 0x2a1a2a, boots: 0x1a1a1a, hair: 'long', hairColor: 0x2a0a0a, glasses: 0xd8b040 },
+    lines: ['반짝이는 비늘은 보석보다 귀하죠.', '좋은 물건엔 좋은 값을 쳐 드려요.'] },
+  { id: 'guardian', name: '신전 수호자 카르마', at: [3, 342], kind: ['legendary'], base: 2e9, look: { skin: 0xc89070, shirt: 0x5a1a1e, vest: 0xd8b040, vestPocket: 0xa8802a, pants: 0x3a1418, boots: 0x2a0a0a, hair: 'short', hairColor: 0x1a1a1a, beard: 0x1a1a1a, hat: 'cap', hatColor: 0xd8b040 },
+    lines: ['신전은 강한 자에게만 문을 연다.', '전설의 물고기를 보고 싶구나.'] },
+  { id: 'kid', name: '꼬마 탐험가 미루', at: [13, 336], kind: ['common', 'uncommon', 'rare'], mut: true, base: 1.1e9, look: { skin: 0xf6d0b0, shirt: 0xffb03a, pants: 0x3a5a8a, boots: 0x8a3a2a, hair: 'short', hairColor: 0x8a4a2a, hat: 'cap', hatColor: 0xff3a4a },
+    lines: ['색깔이 다른 물고기 본 적 있어요? 반짝반짝한 거!', '호수에서 루비 조각 주웠어요!'] }
+];
+const ZONE_CAP = 0.27;
+RODS.forEach((r) => { if (r.zone > ZONE_CAP) r.zone = ZONE_CAP; });
 
 // =====================================================
 //  보트 (보트 상점에서 사요) — 보트 관리인한테 E 키로 불러서 타고, 스페이스(점프)로 뛰어내려요. 보트 위에서도 낚시돼요
@@ -2173,6 +2234,9 @@ const seaWorld = buildSeaWorld({ THREE, scene, SEA, SEA_PIER, JUNGLE, JUNGLE_PON
 const museum = buildMuseum({ THREE, scene, shops, LANTERN_MATS, FISH, RARITY, findFish, makeFishModel, fishScale, fmtKg, compactRig, colliders, inLake, get save() { return save; } });
 // 루비 섬 (큰 바다 남쪽 루비 바다) — 땅 · 신전 · 공방 · 판매점 · 봉인 (ruby.js)
 const ruby = buildRuby({ THREE, scene, shops, addCollider, colliders, LANTERN_MATS });
+// 루비 신전 성소 (봉인이 풀리면 신전 문 앞에서 E 로 들어가요)
+const shrine = buildShrine({ THREE, scene, LANTERN_MATS, door: ruby.door });
+shops.push({ kind: 'shrinedoor', title: '루비 신전의 문 (E)', group: new THREE.Group(), pos: new THREE.Vector3(ruby.door.x, ruby.door.y, ruby.door.z - 1.3), promptAt: new THREE.Vector3(ruby.door.x, ruby.door.y + 3.6, ruby.door.z), r: 1.9 });
 islands.push({ x: RUBY.x, z: RUBY.z, r: RUBY.r }); // 섬 위는 헤엄이 아니라 걸어요 (높이는 groundY 가 rubyHeight 로)
 seaWorld.islands.push({ id: 'ruby', name: '루비 섬', x: RUBY.x, z: RUBY.z, r: RUBY.r }); // 화면 위 섬 안내에도 나와요
 {
@@ -2194,6 +2258,124 @@ seaWorld.islands.push({ id: 'ruby', name: '루비 섬', x: RUBY.x, z: RUBY.z, r:
   });
   // 선착장 옆 보트 관리인 (내 보트를 불러서 루비 섬과 큰 바다를 오가요)
   makeBoatCaller({ x: ruby.dockAt.x + 2.6, z: ruby.dockAt.z + 8.5, wx: ruby.dockAt.x + 2.6, wz: ruby.dockAt.z - 6 });
+}
+// 루비 섬 주민 4명 (서 있는 자리에서 E → 부탁 창)
+// 루비 섬 주민 4명: 섬을 돌아다니다가 루비 호수 · 바닷가에서 낚시해요 (머리 위에 잡은 수). 다가가서 E → 부탁 창
+const RUBY_RODS = ['루비 낚싯대', '석류석 낚싯대', '진홍 용비늘 낚싯대', '루비 낚싯대'];
+RUBY_NPCS.forEach((n, ni) => {
+  const x = n.at[0], z = n.at[1];
+  const body = makeBlockPerson(n.look);
+  body.group.position.set(x, groundY(x, z), z);
+  scene.add(body.group);
+  const tg = makeNameTag(); tg.sp.position.y = 2.35; body.group.add(tg.sp);
+  n.count = 300 + Math.floor(Math.random() * 900);
+  tg.draw(n.name, n.count);
+  // 머리 위 느낌표 (부탁이 있어요)
+  const mark = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.42, 0.14), mat(0xffd84a, 0.4, { emissive: 0xffb02a, emissiveIntensity: 1.2 }));
+  mark.position.set(0, 3.25, 0); body.group.add(mark);
+  const dot = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), mark.material); dot.position.set(0, 2.92, 0); body.group.add(dot);
+  // 낚싯대 · 찌 · 줄
+  const rodG = new THREE.Group(); rodG.position.set(0, -1.048, -0.907); rodG.rotation.x = -2.1; rodG.visible = false; body.armR.add(rodG);
+  const spin = buildRod(RODS.find((r) => r.name === RUBY_RODS[ni]) || RODS[0], rodG);
+  const bob = makeBobber(0.9); bob.visible = false; scene.add(bob);
+  const line = new THREE.Line(new THREE.BufferGeometry(), cordMat); line.visible = false; scene.add(line);
+  Object.assign(n, { body, tag: tg, mark, rodG, spin, bob, line, spots: null, home: { x, z }, state: 'idle', until: performance.now() + 1500 + ni * 1200, target: null, spot: null, ry: 0, walkT: 0, arm: 0, casts: 0, pop: null, stuck: 0 });
+  n.entry = { kind: 'rubynpc', npc: n, title: `${n.name} · 부탁 듣기 (E)`, group: new THREE.Group(), pos: new THREE.Vector3(x, 0, z), promptAt: new THREE.Vector3(x, groundY(x, z) + 3.6, z), r: 2.2 };
+  shops.push(n.entry);
+});
+// 루비 섬 주민 움직이기: 돌아다니기 → 낚시 자리로 → 던지기 → 기다리기 → 낚기 (머리 위로 자랑) → 다시 돌아다니기
+//  플레이어가 가까이 오면 멈춰서 플레이어를 봐요 (부탁 듣기 쉽게)
+// 낚시 자리: 루비 호수 가장자리(집 쪽) + 집에서 가까운 바닷가 — 걸어서 갈 수 있는 곳만
+//  (walkable 은 게임이 다 켜진 뒤에 써야 해서, 처음 움직일 때 한 번 찾아요)
+// 루비 섬 주민 전용 걷기 검사: 마을 NPC 검사(noSwim)는 섬 위를 막아서 따로 만들어요 — 섬 땅 위 · 물 아님 · 호수 아님
+function rubyWalk(x, z, fx, fz) { return onRuby(x, z) && !inRubyPond(x, z) && !isSwimSpot(x, z) && walkable(x, z, fx ?? x, fz ?? z); }
+function rubyClear(a, b) {
+  const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.4));
+  let px = a.x, pz = a.z;
+  for (let i = 1; i <= n; i++) { const x = a.x + (b.x - a.x) * i / n, z = a.z + (b.z - a.z) * i / n; if (!rubyWalk(x, z, px, pz)) return false; px = x; pz = z; }
+  return true;
+}
+function rubySpots(n) {
+  const spots = [], { x, z } = n.home, L = RUBY_LAGOON;
+  for (const da of [0, 0.5, -0.5, 1.0, -1.0]) {
+    const a = Math.atan2(z - L.z, x - L.x) + da;
+    const sx = L.x + Math.cos(a) * (L.rx + 1.5), sz = L.z + Math.sin(a) * (L.rz + 1.5);
+    if (rubyWalk(sx, sz) && rubyClear({ x, z }, { x: sx, z: sz })) { spots.push({ x: sx, z: sz, tx: L.x + Math.cos(a) * L.rx * 0.45, tz: L.z + Math.sin(a) * L.rz * 0.45, wy: L.y }); break; }
+  }
+  for (const da of [0, 0.4, -0.4, 0.8, -0.8]) {
+    const a = Math.atan2(z - RUBY.z, x - RUBY.x) + da;
+    const sx = RUBY.x + Math.cos(a) * RUBY.r * 0.9, sz = RUBY.z + Math.sin(a) * RUBY.r * 0.9;
+    if (rubyWalk(sx, sz) && rubyClear({ x, z }, { x: sx, z: sz })) { spots.push({ x: sx, z: sz, tx: RUBY.x + Math.cos(a) * RUBY.r * 1.1, tz: RUBY.z + Math.sin(a) * RUBY.r * 1.1, wy: 0.1 }); break; }
+  }
+  return spots;
+}
+function updateRubyNpcs(now, dt, t) {
+  const pp = person.position;
+  for (const n of RUBY_NPCS) {
+    const g = n.body.group, p = g.position;
+    if (!n.spots) n.spots = rubySpots(n);
+    if (Math.abs(pp.z - p.z) > 120) { n.entry.off = false; continue; } // 루비 섬에서 멀면 움직이지 않아요 (가볍게)
+    const nearMe = (pp.x - p.x) ** 2 + (pp.z - p.z) ** 2 < 3.2 * 3.2 && !game.room;
+    let moving = false;
+    // 내가 다가오면 잠깐(3.5초)만 멈춰서 나를 보고, 다시 하던 일을 해요 (그 뒤 15초 동안은 또 멈추지 않아요)
+    //  부탁 창을 열어 둔 동안만 계속 나를 봐요. (예전엔 가까이 있는 내내 멈춰서 쳐다보기만 했어요)
+    const panelOpen = rubyQuestNpc === n && !museumPanel.classList.contains('hidden');
+    if (nearMe && n.state !== 'fish' && now > (n.lookCool || 0)) { n.lookUntil = now + 3500; n.lookCool = now + 15000; }
+    if (n.state !== 'fish' && (panelOpen || now < (n.lookUntil || 0))) {
+      n.ry = Math.atan2(p.x - pp.x, p.z - pp.z); // 사람 앞 = -z
+      n.until = Math.max(n.until, now + 600);      // 멈춘 동안 다음 행동 시간은 밀어 둬요
+    } else if (n.state === 'idle') {
+      if (now > n.until) {
+        if (n.spots.length && Math.random() < 0.55) { n.spot = n.spots[Math.floor(Math.random() * n.spots.length)]; n.target = { x: n.spot.x, z: n.spot.z }; }
+        else { // 집 근처 아무 데나 (걸어서 곧장 갈 수 있는 곳)
+          n.spot = null; n.target = null;
+          for (let k = 0; k < 8 && !n.target; k++) { const a = Math.random() * 6.28, r = 2 + Math.random() * 6, tx = n.home.x + Math.cos(a) * r, tz = n.home.z + Math.sin(a) * r; if (rubyWalk(tx, tz) && rubyClear(p, { x: tx, z: tz })) n.target = { x: tx, z: tz }; }
+        }
+        n.state = n.target ? 'walk' : 'idle'; n.until = now + 2000 + Math.random() * 3000; n.stuck = 0;
+      }
+    } else if (n.state === 'walk') {
+      const dx = n.target.x - p.x, dz = n.target.z - p.z, d = Math.hypot(dx, dz);
+      if (d < 0.3) {
+        if (n.spot) { n.state = 'fish'; n.casts = 2 + Math.floor(Math.random() * 3); n.phase = 'cast'; n.until = now + 700; n.ry = Math.atan2(p.x - n.spot.tx, p.z - n.spot.tz); n.rodG.visible = true; }
+        else { n.state = 'idle'; n.until = now + 3000 + Math.random() * 4000; }
+      } else {
+        const st = Math.min(d, 2.0 * dt), nx = p.x + (dx / d) * st, nz = p.z + (dz / d) * st;
+        if (rubyWalk(nx, nz, p.x, p.z)) { p.x = nx; p.z = nz; moving = true; n.ry = Math.atan2(-dx, -dz); }
+        else if ((n.stuck += dt) > 1.5) { n.state = 'idle'; n.until = now + 800; }
+      }
+    } else if (n.state === 'fish') {
+      const sp = n.spot;
+      if (n.phase === 'cast' && now > n.until) { n.phase = 'wait'; n.until = now + 5000 + Math.random() * 9000; n.bob.position.set(sp.tx, sp.wy + 0.16, sp.tz); n.bob.visible = true; }
+      else if (n.phase === 'wait') {
+        n.bob.position.y = sp.wy + 0.16 + Math.sin(t * 2 + n.count) * 0.03;
+        if (now > n.until) { // 낚았어요!
+          const fish = rollFish(1.1, 'ruby');
+          n.count++; n.tag.draw(n.name, n.count);
+          if (n.pop) endCatchShow(n.pop);
+          n.pop = startCatchShow(fish, n.bob.position, now, 2600);
+          n.bob.visible = false;
+          n.casts--;
+          n.phase = n.casts > 0 ? 'cast' : 'done'; n.until = now + 2800;
+        }
+      } else if (n.phase === 'done' && now > n.until) { n.state = 'idle'; n.rodG.visible = false; n.until = now + 2000 + Math.random() * 3000; }
+    }
+    if (n.pop && !updateCatchShow(n.pop, now, t, p, n.ry, 2.0)) n.pop = null;
+    // 몸 · 팔다리 · 땅 높이
+    p.y += (groundY(p.x, p.z) - p.y) * Math.min(1, dt * 10);
+    let dr = n.ry - g.rotation.y; dr = Math.atan2(Math.sin(dr), Math.cos(dr)); g.rotation.y += dr * Math.min(1, dt * 8);
+    if (moving) n.walkT += dt * 8;
+    const swing = moving ? Math.sin(n.walkT) * 0.6 : 0;
+    n.body.legs[0].rotation.x += (swing - n.body.legs[0].rotation.x) * Math.min(1, dt * 15);
+    n.body.legs[1].rotation.x += (-swing - n.body.legs[1].rotation.x) * Math.min(1, dt * 15);
+    const armT = n.rodG.visible ? 1.2 : 0;
+    n.arm += (armT - n.arm) * Math.min(1, dt * 10);
+    n.body.armL.rotation.x = n.arm - swing; n.body.armR.rotation.x = n.arm + swing;
+    placeSpin(n.spin, t);
+    n.line.visible = n.bob.visible;
+    if (n.bob.visible) { n.rodG.localToWorld(tmpV.set(0, ROD_LEN / 2, 0)); const e = n.bob.position; n.line.geometry.setFromPoints([tmpV.clone(), new THREE.Vector3((tmpV.x + e.x) / 2, Math.max(e.y + 0.3, (tmpV.y + e.y) / 2 - 0.3), (tmpV.z + e.z) / 2), e.clone()]); }
+    n.mark.rotation.y = t * 2;
+    n.entry.pos.set(p.x, 0, p.z); n.entry.promptAt.set(p.x, p.y + 3.6, p.z);
+  }
 }
 // 루비 섬 정기선: 모래사장 부두 끝 ↔ 루비 섬 선착장 (E 로 타면 화면이 까매졌다가 건너가요)
 const FERRY_HOME = { x: (SEA_PIER.x0 + SEA_PIER.x1) / 2, z: SEA_PIER.z1 - 1.0 };
@@ -2225,8 +2407,9 @@ const FERRY_HOME = { x: (SEA_PIER.x0 + SEA_PIER.x1) / 2, z: SEA_PIER.z1 - 1.0 };
   fb.add(new THREE.BoxGeometry(1, 1, 1), 0x8a1a2a, [sx, 1.75, sz], [0, 0, 0], [1.3, 0.55, 0.06]);
   fb.build(scene); glowF.build(scene, { cast: false, material: new THREE.MeshStandardMaterial({ color: 0xffe6b0, emissive: 0xffb050, emissiveIntensity: 1.0 }) });
   const sign = makeSign('루비 섬 정기선'); sign.scale.setScalar(0.5); sign.position.set(sx, 1.75, sz - 0.04); sign.rotation.y = Math.PI; scene.add(sign);
-  shops.push({ kind: 'ferry', to: 'ruby', title: '루비 섬 정기선 · 타기 (E)', group: new THREE.Group(), pos: new THREE.Vector3(FERRY_HOME.x, 0.26, FERRY_HOME.z), promptAt: new THREE.Vector3(FERRY_HOME.x, 2.6, FERRY_HOME.z), r: 1.6 });
-  shops.push({ kind: 'ferry', to: 'home', title: '정기선 · 모래사장 부두로 돌아가기 (E)', group: new THREE.Group(), pos: new THREE.Vector3(ruby.dockAt.x, 0.26, ruby.dockAt.z), promptAt: new THREE.Vector3(ruby.dockAt.x, 2.6, ruby.dockAt.z), r: 1.8 });
+  // 정기선은 처음엔 잠겨 있어요: 보트로 루비 섬을 직접 찾아가서, 거기 선착장 표지판에서 E 로 열어야 해요 (syncFerry)
+  shops.push({ kind: 'ferry', to: 'ruby', title: '루비 섬 정기선 (E)', group: new THREE.Group(), pos: new THREE.Vector3(SEA_PIER.x0 - 0.6, 0.26, SEA_PIER.z1 - 3.5), promptAt: new THREE.Vector3(SEA_PIER.x0 - 1.9, 3.6, SEA_PIER.z1 - 3.5), r: 6 }); // 배 근처 어디서든
+  shops.push({ kind: 'ferry', to: 'home', title: '정기선 (E)', group: new THREE.Group(), pos: new THREE.Vector3(ruby.dockAt.x - 1.2, 0.26, ruby.dockAt.z + 1.0), promptAt: new THREE.Vector3(ruby.dockAt.x - 3.6, 3.6, ruby.dockAt.z + 1.0), r: 6 });
 }
 // 정글 판매점: 정글섬에서 잡은 비싼 물고기를 바로 팔 수 있어요
 {
@@ -2331,7 +2514,7 @@ function makeNameTag() {
     x.font = '54px "Jua", "Malgun Gothic", sans-serif';
     x.strokeText(name, 256, 50); x.fillStyle = '#e8f0ff'; x.fillText(name, 256, 50);
     x.font = '80px "Jua", "Malgun Gothic", sans-serif';
-    const num = Number(n).toLocaleString('en-US'); // 99,812 처럼 쉼표
+    const num = n === '' ? '' : Number(n).toLocaleString('en-US'); // 99,812 처럼 쉼표 (주민은 숫자 없이)
     x.strokeText(num, 256, 135); x.fillStyle = '#ffffff'; x.fillText(num, 256, 135);
     tex.needsUpdate = true;
   };
@@ -2726,13 +2909,13 @@ function updateWalkers(now, dt, t) {
 // =====================================================
 const SAVE_KEY = 'lakeFishing_v2';
 // 살 수 있는 집 (seaworld.js 의 집 id 와 같아요). slots = 어항 칸 수
-const HOUSE_INFO = { sunset: { slots: 8 }, coral: { slots: 12 }, pine: { slots: 14 }, star: { slots: 18 }, whale: { slots: 26 } };
-const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {}, furn: {}, decor: {}, mats: {}, garden: {}, pets: { own: [], on: null, love: {}, nm: {}, t: 0 }, friends: {}, rewards: { dex: [] }, titles: [], title: '', fireworks: 0, museum: { fish: {}, paid: false }, ruby: { s1: 0, s2: 0 } };
+const HOUSE_INFO = { sunset: { slots: 8 }, coral: { slots: 12 }, pine: { slots: 14 }, star: { slots: 18 }, whale: { slots: 26 }, hill2: { slots: 32 }, crimson3: { slots: 40 }, palace4: { slots: 50 } };
+const save = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1, quest: null, questReadyAt: 0, questsDone: 0, outfit: { ...DEFAULT_OUTFIT }, boats: [], boat: -1, homes: [], tanks: {}, houseStyles: {}, chests: {}, furn: {}, decor: {}, mats: {}, garden: {}, pets: { own: [], on: null, love: {}, nm: {}, t: 0 }, friends: {}, rewards: { dex: [] }, titles: [], title: '', fireworks: 0, museum: { fish: {}, paid: false }, ruby: { s1: 0, s2: 0, found: false, ferry: false, boss: { s1: false, s2: false }, q: {}, qDone: 0 } };
 
 // 저장된 기록은 누구나 개발자 도구로 고칠 수 있어서 그대로 믿으면 안 돼요.
 // 불러올 때 하나하나 검사해서, 이상한 값은 버리거나 안전한 값으로 바꿔요.
 // (이상한 글자가 화면에 HTML 로 끼어드는 것도 막고, 기록이 깨져도 게임이 켜지게 해요)
-const MAX_MONEY = 1e12;
+const MAX_MONEY = 1e28; // 자(10^24) 단위까지 모을 수 있어요
 const intIn = (v, lo, hi, def) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.floor(Number(v)))) : def);
 function cleanSave(s) {
   const out = { money: 0, caught: 0, inv: [], dex: {}, rod: 0, owned: [0], nextId: 1 };
@@ -2777,7 +2960,15 @@ function cleanSave(s) {
   // 박물관에 기증한 물고기 (종류마다 한 마리) — museum.js
   cleanMuseum(s, out, FISH, cleanItems);
   // 루비 신전 봉인: 바친 물고기 수 (0~2) — ruby.js
-  out.ruby = { s1: intIn(s.ruby && s.ruby.s1, 0, 2, 0), s2: intIn(s.ruby && s.ruby.s2, 0, 2, 0) };
+  // found = 루비 섬에 직접 가 봤는지 · ferry = 루비 섬 선착장에서 정기선을 열었는지
+  out.ruby = { s1: intIn(s.ruby && s.ruby.s1, 0, 1, 0), s2: intIn(s.ruby && s.ruby.s2, 0, 1, 0), found: !!(s.ruby && s.ruby.found === true), ferry: !!(s.ruby && s.ruby.ferry === true),
+    boss: { s1: !!(s.ruby && s.ruby.boss && s.ruby.boss.s1 === true), s2: !!(s.ruby && s.ruby.boss && s.ruby.boss.s2 === true) }, q: {}, qDone: intIn(s.ruby && s.ruby.qDone, 0, 1e9, 0) }; // boss = 성소 보스를 낚았는지
+  // 루비 섬 주민 부탁: 주민마다 { fish: 물고기 이름, mut: 이로치 아무거나면 true, reward: 보상 }
+  if (s.ruby && s.ruby.q && typeof s.ruby.q === 'object') for (const [k, v] of Object.entries(s.ruby.q)) {
+    if (!RUBY_NPCS.some((n) => n.id === k) || !v || typeof v !== 'object') continue;
+    const f = typeof v.fish === 'string' && findFish(v.fish);
+    if (f && f.zone === 'ruby') out.ruby.q[k] = { fish: f.name, mut: v.mut === true, reward: intIn(v.reward, 1, 1e11, 1e9) };
+  }
   let next = Math.max(intIn(s.nextId, 1, 1e12, 1), ...[...ids].map((i) => i + 1), 1);
   for (const it of [...out.inv, ...Object.values(out.tanks).flat(), ...Object.values(out.museum.fish)]) if (!it.id) it.id = next++;
   out.nextId = next;
@@ -2821,7 +3012,7 @@ const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // 저장할 때마다 시각을 적어 둬요 (계정 기록과 비교해서 더 최근 걸 쓰려고). 로그인했으면 계정에도 올려요
 const writeSave = () => { save.savedAt = Date.now(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (_) {} if (typeof scheduleCloudSave === 'function') scheduleCloudSave(); };
 const curRod = () => RODS[save.rod];
-const money = (n) => '$' + n.toLocaleString('en-US');
+const money = (n) => fmtMoney(n); // 1억부터는 억 · 조 · 경 · 해 · 자 (money.js)
 
 // =====================================================
 //  화면(UI)
@@ -2990,7 +3181,7 @@ let romanceTimer = 0;
 //  글리치의 날 — 가끔(8~15분에 한 번, 4분 동안) 세상이 지직거려요
 //  이때 낚은 물고기는 무조건 글리치 이로치가 붙어요 (다른 이로치랑 같이 겹칠 수 있어요)
 // =====================================================
-const glitchDay = { active: false, until: 0, next: performance.now() + (8 + Math.random() * 7) * 60000 };
+const glitchDay = { active: false, until: 0, next: performance.now() + (20 + Math.random() * 15) * 60000 }; // 20~35분에 한 번
 function glitchify(fish) {
   if (!glitchDay.active || !fish) return fish;
   const names = mutList(fish.mut).map((m) => m.name);
@@ -3001,6 +3192,65 @@ function glitchify(fish) {
   const f = findFish(fish.name);
   return { ...fish, mut, price: priceOf(f, fish.weight, mut) };
 }
+// =====================================================
+//  피의 날 — 글리치의 날(20~35분)보다 조금 자주(16~28분에 한 번, 4분 동안). 하늘이 붉게 물들고 붉은 달이 떠요
+//  이때 낚은 물고기는 무조건 핏빛 이로치가 붙어요 (글리치의 날과 겹치지 않게 번갈아 와요)
+// =====================================================
+const bloodDay = { active: false, until: 0, next: performance.now() + (16 + Math.random() * 12) * 60000 }; // 16~28분에 한 번
+function bloodify(fish) {
+  if (!bloodDay.active || !fish) return fish;
+  const names = mutList(fish.mut).map((m) => m.name);
+  if (names.includes('핏빛')) return fish;
+  if (names.length >= 3) names.pop();
+  names.unshift('핏빛');
+  const mut = mutKey(names.join('+'));
+  return { ...fish, mut, price: priceOf(findFish(fish.name), fish.weight, mut) };
+}
+// 붉은 달 + 떨어지는 붉은 빛 조각 (피의 날에만)
+const bloodSky = (() => {
+  const g = new THREE.Group(); g.visible = false; g.userData.dynamic = true;
+  const moon = new THREE.Mesh(new THREE.CircleGeometry(9, 40), new THREE.MeshBasicMaterial({ color: 0xff2a2a, fog: false, transparent: true, opacity: 0.95 }));
+  const glowM = new THREE.Mesh(new THREE.CircleGeometry(16, 40), new THREE.MeshBasicMaterial({ color: 0xff1a1a, fog: false, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
+  glowM.position.z = -0.5;
+  const md = new THREE.Group(); md.add(glowM, moon); g.add(md);
+  const drops = [];
+  const dm = new THREE.MeshBasicMaterial({ color: 0xff3a4a, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  for (let i = 0; i < 70; i++) { const d = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), dm); d.userData = { ph: Math.random(), x: (Math.random() - 0.5) * 70, z: (Math.random() - 0.5) * 70, sp: 6 + Math.random() * 6 }; g.add(d); drops.push(d); }
+  scene.add(g);
+  return { g, md, drops };
+})();
+function setBloodDay(on) {
+  const now = performance.now();
+  bloodDay.active = on;
+  document.body.classList.toggle('bloodDay', on);
+  $('bloodHud').classList.toggle('hidden', !on);
+  bloodSky.g.visible = on;
+  if (on) {
+    bloodDay.until = now + 4 * 60000;
+    showBanner('피의 날', '하늘이 붉게 물들었어요… 지금 낚는 물고기는 전부 핏빛 이로치가 붙어요!', '#ff3a4a', 6000);
+    tone(98, 1.6, 'sawtooth', 0.05); tone(73, 2.0, 'sine', 0.08, 0.3); tone(110, 0.25, 'square', 0.04, 1.2); tone(110, 0.25, 'square', 0.04, 1.45);
+  } else {
+    bloodDay.next = now + (16 + Math.random() * 12) * 60000;
+    sayRomance(['붉은 달이 가라앉았어요.']);
+  }
+}
+function updateBloodDay(now, t) {
+  if (!bloodDay.active && now > bloodDay.next) { if (glitchDay.active) bloodDay.next = glitchDay.until + 60000; else setBloodDay(true); }
+  else if (bloodDay.active && now > bloodDay.until) setBloodDay(false);
+  if (!bloodDay.active) return;
+  const s = Math.ceil((bloodDay.until - now) / 1000);
+  const label = `피의 날 · 낚는 물고기마다 핏빛! · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const el = $('bloodHud'); if (el.textContent !== label) el.textContent = label;
+  // 하늘 · 안개를 붉게 (낮밤 색 위에 덧칠), 붉은 달은 카메라 앞 하늘 높이
+  const beat = (t * 1.1) % 1, pulse = Math.exp(-((beat - 0.08) ** 2) * 500) + Math.exp(-((beat - 0.26) ** 2) * 500) * 0.7;
+  scene.background.lerp(BLOOD_SKY, 0.55 + pulse * 0.1); scene.fog.color.lerp(BLOOD_SKY, 0.5);
+  const p = person.position;
+  bloodSky.md.position.set(p.x - Math.sin(cam.yaw) * 160, 70, p.z - Math.cos(cam.yaw) * 160);
+  bloodSky.md.lookAt(camera.position);
+  bloodSky.md.scale.setScalar(1 + pulse * 0.04);
+  for (const d of bloodSky.drops) { const u = d.userData, q = (t * u.sp / 30 + u.ph) % 1; d.position.set(p.x + u.x, 30 - q * 32, p.z + u.z); }
+}
+const BLOOD_SKY = new THREE.Color(0x5a0a14);
 function setGlitchDay(on) {
   const now = performance.now();
   glitchDay.active = on;
@@ -3011,12 +3261,12 @@ function setGlitchDay(on) {
     sayRomance(['세상이 뭔가 이상해요!']);
     tone(220, 0.08, 'square', 0.05); tone(880, 0.05, 'square', 0.04, 0.09); tone(140, 0.12, 'sawtooth', 0.04, 0.16);
   } else {
-    glitchDay.next = now + (8 + Math.random() * 7) * 60000;
+    glitchDay.next = now + (20 + Math.random() * 15) * 60000;
     sayRomance(['세상이 다시 멀쩡해졌어요.']);
   }
 }
 function updateGlitchDay(now) {
-  if (!glitchDay.active && now > glitchDay.next) setGlitchDay(true);
+  if (!glitchDay.active && now > glitchDay.next) { if (bloodDay.active) glitchDay.next = bloodDay.until + 60000; else setGlitchDay(true); }
   else if (glitchDay.active && now > glitchDay.until) setGlitchDay(false);
   if (glitchDay.active) {
     const s = Math.ceil((glitchDay.until - now) / 1000);
@@ -3101,12 +3351,30 @@ function renderDex() {
   const list = $('dexList');
   if (dexTab === 'fish') {
     const got = FISH.filter((f) => save.dex[f.name]).length;
-    list.innerHTML = `<div class="count">모은 물고기 ${got} / ${FISH.length}</div><div class="grid">` + FISH.map((f) => {
+    // 사는 곳(섬 · 물)별로 나눠서 보여 줘요. 구역마다 제목 + 모은 수
+    const card = (f) => {
       const d = save.dex[f.name], R = RARITY[f.rarity];
       return d
         ? `<div class="card" style="--rc:${R.color}"><div class="nm">${f.name}</div><div style="color:${R.color}">${R.label}</div><div>${d.count}마리 · 최고 ${fmtKg(d.best)}</div></div>`
         : `<div class="card unknown" style="--rc:${R.color}"><div class="nm">???</div><div style="color:${R.color}">${R.label}</div><div>아직 못 잡았어요</div></div>`;
-    }).join('') + '</div>';
+    };
+    const AREAS = [
+      ['큰 호수 · 개울', (f) => !f.zone && !f.season && !f.weather],
+      ['사계절 (큰 호수)', (f) => !!f.season],
+      ['비 오는 날 (큰 호수)', (f) => !!f.weather],
+      ['산 위 연못', (f) => f.zone === 'mountain'],
+      ['오로라 강', (f) => f.zone === 'aurora'],
+      ['바다', (f) => f.zone === 'sea'],
+      ['정글섬', (f) => f.zone === 'jungle'],
+      ['루비 섬', (f) => f.zone === 'ruby'],
+      ['루비 신전 성소 (보스)', (f) => f.zone === 'boss']
+    ];
+    list.innerHTML = `<div class="count">모은 물고기 ${got} / ${FISH.length}</div>` + AREAS.map(([name, test]) => {
+      const fs = FISH.filter(test);
+      if (!fs.length) return '';
+      const n = fs.filter((f) => save.dex[f.name]).length;
+      return `<h3 class="chartH">${name} <span style="color:#aaa;font-weight:400">${n} / ${fs.length}</span></h3><div class="grid">${fs.map(card).join('')}</div>`;
+    }).join('');
   } else {
     list.innerHTML = `<div class="count">가진 낚싯대 ${save.owned.length} / ${RODS.length} · 가진 낚싯대는 여기서 바꿔 낄 수 있어요</div>`;
     const grid = document.createElement('div');
@@ -3151,9 +3419,11 @@ function renderRodShop() {
     btn.className = 'actBtn';
     const sealInfo = r.seal ? SEALS.find((q) => q.id === r.seal) : null;
     if (owned) { btn.textContent = '보유 중'; btn.disabled = true; }
-    else if (sealInfo && (save.ruby[r.seal] || 0) < sealInfo.need) { // 봉인이 아직 안 풀렸어요
-      btn.textContent = `봉인됨 · ${sealInfo.name}`; btn.disabled = true;
-      row.querySelector('.info').insertAdjacentHTML('beforeend', `<div class="perk" style="color:#ff8a9a">루비 신전 ${sealInfo.name}: [${sealInfo.mut}] ${sealInfo.fish} ${sealInfo.need}마리를 바치면 풀려요 (${save.ruby[r.seal] || 0}/${sealInfo.need}) · 가격 ${money(r.price)}</div>`);
+    else if (sealInfo && !rodUnlocked(r)) { // 봉인 → 성소 보스까지 해야 팔아요
+      const sealed = (save.ruby[r.seal] || 0) < sealInfo.need;
+      btn.textContent = sealed ? `봉인됨 · ${sealInfo.name}` : `보스를 낚아야 해요`; btn.disabled = true;
+      row.querySelector('.info').insertAdjacentHTML('beforeend', `<div class="perk" style="color:#ff8a9a">① 루비 신전의 봉인 2개 모두 풀기: ${SEALS.map((q) => `[${q.mut}] ${q.fish} ${q.need}마리${sealDone(q) ? ' (완료)' : ''}`).join(' · ')}<br>② 열린 신전 문 → 성소 연못에서 보스 「${sealInfo.boss}」 낚기<br>가격 ${money(r.price)}</div>`);
+      if (!sealed && !doorOpen()) btn.textContent = '봉인이 하나 남았어요';
     }
     else {
       btn.textContent = money(r.price);
@@ -3373,6 +3643,8 @@ function interact() {
   if (s.kind === 'tank') { if (save.homes.includes(s.house.id)) { tankHouse = s.house; renderTank(); openPanel($('tankPanel')); } return; }
   if (s.kind === 'mtank') { openMuseumTank(s.tank); return; }   // 박물관 어항
   if (s.kind === 'rubyseal') { openSeal(s.sealIdx); return; }    // 루비 신전 봉인
+  if (s.kind === 'shrinedoor') { openShrineDoor(); return; }     // 루비 신전의 문 → 성소
+  if (s.kind === 'rubynpc') { openRubyQuest(s.npc); return; }    // 루비 섬 주민 부탁
   if (s.kind === 'ferry') { useFerry(s.to); return; }            // 루비 섬 정기선
   if (s.kind === 'museumdesk') { openMuseumDesk(); return; }     // 박물관 안내 데스크
   if (s.kind === 'rod' || s.kind === 'rod2' || s.kind === 'rod3' || s.kind === 'rod4' || s.kind === 'rod5') { rodShopKind = { rod: 'base', rod2: 'mountain', rod3: 'aurora', rod4: 'jungle', rod5: 'ruby' }[s.kind]; renderRodShop(); openPanel(ui.rodShopPanel); }
@@ -3630,15 +3902,36 @@ function cast() {
 function startReel() {
   // 산 위 연못처럼 운 보너스가 있는 물이면 더해 줘요
   // 산 위 연못이면 그곳에만 사는 신기한 물고기가 나와요
-  const fish = glitchify(rollFish(curRod().luck + (game.castWater?.luck || 0) + (isNight() ? 0.05 : 0) + buffLuck() + life.luckBonus(), game.castWater?.zone || 'lake', isRaining(), getSeason())); // 밤에는 운 +5%, 글리치의 날엔 글리치
+  const luckNow = curRod().luck + (game.castWater?.luck || 0) + (isNight() ? 0.05 : 0) + buffLuck() + life.luckBonus(); // 밤에는 운 +5%
+  // 성소 연못: 아직 안 낚은 보스가 있으면 보스가 물어요 (없으면 보통 루비 물고기)
+  const bossSeal = game.castWater?.boss ? pendingBoss() : null;
+  const fish = bossSeal ? makeBossCatch(bossSeal.boss, luckNow) : bloodify(glitchify(rollFish(luckNow, game.castWater?.zone || 'lake', isRaining(), getSeason()))); // 글리치의 날엔 글리치 · 피의 날엔 핏빛
   const f = findFish(fish.name);
   const R = RARITY[f.rarity];
-  // 초록 칸 크기는 낚싯대가 정해요 (어떤 물고기든 같아요). 물고기 희귀도는 날뛰는 속도만 바꿔요.
-  const zoneW = zoneOf(curRod());
-  game.reel = { fish, zoneW, zone: 0.5 - zoneW / 2, vel: 0, fishPos: 0.5, target: 0.5, nextJump: 0, progress: 0.3, speed: R.speed, jump: R.jump, heavy: fishScale(f, fish.weight) >= 2 };
+  // 초록 칸 크기는 낚싯대가 정해요 (어떤 물고기든 같아요). 물고기는 날뛰는 속도 · 게이지 차는 속도를 바꿔요.
+  const zoneW = zoneOf(curRod()) * (f.boss ? 0.45 : 1); // 보스: 초록 칸이 확 줄어 회색 막대가 훨씬 길어요
+  const d = reelDifficulty(fish, f);
+  game.reel = { fish, zoneW, zone: 0.5 - zoneW / 2, vel: 0, fishPos: 0.5, target: 0.5, nextJump: 0, progress: 0.3, speed: d.speed, jump: d.jump, fill: d.fill, lose: d.lose, boss: !!f.boss, heavy: fishScale(f, fish.weight) >= 2 };
+  ui.reelBox.classList.toggle('bossReel', !!f.boss);
+  if (f.boss) bossAppears(f);
   game.state = 'reeling';
   if (f.huge) game.shake = { until: performance.now() + 900, mag: 0.12 }; // 걸리는 순간 화면이 흔들려요
   updateUI();
+}
+
+// 물고기마다 얼마나 날뛰는지 (값이 비쌀수록 훨씬 어렵게)
+//  - 모든 물고기: 예전보다 30% 빠르게, 방향도 더 자주 바꿔요
+//  - $100만부터 점점 더 빠르고 자주 휙휙 (값이 $10억이면 최고로 어려워요)
+//  - $1,000만 이상: 초록 칸 안에 있어도 게이지가 느리게 차요
+//  - 보스: 지금 있는 물고기 중 제일 심하게 요동치고 게이지도 아주 느리게 차요 (대신 놓쳐도 게이지가 조금 천천히 줄어요)
+const FISH_SPEED_UP = 1.3, FISH_JUMP_UP = 0.8;
+function reelDifficulty(fish, f) {
+  const R = RARITY[f.rarity], price = Math.max(1, fish.price || 1);
+  const hard = Math.min(1, Math.max(0, Math.log10(price / 1e6) / 3));
+  const d = { speed: R.speed * FISH_SPEED_UP * (1 + hard * 1.1), jump: R.jump * FISH_JUMP_UP * (1 - hard * 0.45), fill: 1, lose: 0.24 };
+  if (price >= 1e7) d.fill = Math.max(0.42, 0.72 - 0.1 * Math.log10(price / 1e7));
+  if (f.boss) { d.speed = Math.max(d.speed, RARITY.mythic.speed * FISH_SPEED_UP * 2.4); d.jump = 0.26; d.fill = 0.3; d.lose = 0.15; }
+  return d;
 }
 
 let fishAnim = null;
@@ -3675,6 +3968,7 @@ function finishCatch() {
   multi.sendCatch(item); // 같은 방 사람들에게 "낚았어요!" 소식
   if (f.huge) { tone(196, 1.2, 'triangle', 0.14, 0.5); tone(262, 1.2, 'triangle', 0.12, 0.7); tone(392, 1.4, 'triangle', 0.12, 0.9); }
   showCatchCard(item, isNew);
+  if (f.boss) bossCaught(f);
   if (f.rarity === 'legendary' || f.rarity === 'mythic' || sc >= 2.5) sayRomance(BIG_LINES);
   renderHotbar();
   updateUI();
@@ -3760,7 +4054,7 @@ window.addEventListener('keydown', (e) => {
   if (mk) { keys[mk] = true; e.preventDefault(); }
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyB') toggleBag(); // 가방 열고 닫기
-  if (e.code === 'KeyF' && !e.repeat && !game.room) setFirstPerson(!cam.fp); // 1인칭 켜고 끄기 (집 안에선 안 돼요)
+  if (e.code === 'KeyF' && !e.repeat && !fixedCam()) setFirstPerson(!cam.fp); // 1인칭 켜고 끄기 (집 안에선 안 돼요 · 박물관은 돼요)
   if (e.code === 'KeyV' && !e.repeat) toggleBoat(); // 보트 타기/내리기
   // 달리기 켜기/끄기: Ctrl 을 한 번 눌렀다 떼요 (꾹 누른 채 W 를 누르면 브라우저 탭이 닫히니 조심!)
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) { e.preventDefault(); game.running = !game.running; $('runHud').classList.toggle('hidden', !game.running); }
@@ -3807,8 +4101,10 @@ window.addEventListener('pointerup', (e) => {
   if (e.button === 0) pressEnd();
   if (e.button === 2) dragging = false;
 });
+// 집 안만 고정 시점이에요. 박물관 안은 평소처럼 마우스로 돌리고 휠로 확대해요
+function fixedCam() { return !!game.room && !game.room.freeCam; }
 function turnCamera(dx, dy, k) {
-  if (game.room) return; // 집 안은 고정 시점
+  if (fixedCam()) return; // 집 안은 고정 시점
   const s = opts.sens * k;
   cam.yaw -= dx * s;
   cam.pitch = Math.min(1.25, Math.max(0.05, cam.pitch + dy * s * 0.7 * (opts.invert ? -1 : 1)));
@@ -3823,7 +4119,7 @@ window.addEventListener('pointermove', (e) => {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 // 휠: 멀리/가까이. 가장 가까운 데서 한 번 더 당기면 1인칭, 1인칭에서 밀면 다시 3인칭
 canvas.addEventListener('wheel', (e) => {
-  if (game.room) return;
+  if (fixedCam()) return;
   if (cam.fp) { if (e.deltaY > 0) setFirstPerson(false); return; }
   if (cam.dist <= 5.01 && e.deltaY < 0) { setFirstPerson(true); return; }
   cam.dist = Math.min(18, Math.max(5, cam.dist + e.deltaY * 0.01));
@@ -3851,6 +4147,7 @@ function onRuby(x, z) { return (x - RUBY.x) ** 2 + (z - RUBY.z) ** 2 < RUBY.r * 
 const isSwimSpot = (x, z) => !onDock(x, z) && !onStairs(x, z) && !onIsland(x, z) && !onBridge(x, z) && !onBridge2(x, z) && inLake(x, z) && !isShallow(x, z);
 // 발이 닿는 높이: 부두 / 계단 / 섬 / 깊은 물(수영) / 얕은 물 / 언덕 위 / 땅
 function groundY(x, z) {
+  if (z < -900 && x > 300 && shrine.inside(x, z)) return shrine.room.floorY; // 루비 신전 성소 바닥
   if (z < -900 && museum.inside(x, z)) return museum.room.floorY;   // 박물관 전시관 바닥
   if (z < -300 && seaWorld.inRoom(x, z)) return ISLAND_TOP + 0.05; // 집 안 방 마루
   if (x > 55 && x < 70) { const my = museum.groundAt(x, z); if (my !== null) return my; } // 박물관 현관 계단
@@ -3871,9 +4168,10 @@ function groundY(x, z) {
 }
 // noSwim = true 면 깊은 물에는 못 들어가요 (돌아다니는 NPC 들은 헤엄치지 않아요)
 function walkable(x, z, fromX, fromZ, noSwim = false) {
-  if ((x < BOUNDS.x0 || x > BOUNDS.x1 || z < BOUNDS.z0 || z > BOUNDS.z1) && !inSeaArea(x, z) && !(z < -300 && seaWorld.inRoom(x, z)) && !museum.inArea(x, z) && !(z < -900 && museum.inside(x, z))) return false;
+  if ((x < BOUNDS.x0 || x > BOUNDS.x1 || z < BOUNDS.z0 || z > BOUNDS.z1) && !inSeaArea(x, z) && !(z < -300 && seaWorld.inRoom(x, z)) && !museum.inArea(x, z) && !(z < -900 && museum.inside(x, z)) && !(z < -900 && x > 300 && shrine.inside(x, z))) return false;
   if ((x > 40 || z < -900) && museum.blocked(x, z)) return false; // 박물관 건물 · 어항 · 벽
   if (z > 250 && ruby && ruby.blocked(x, z)) return false;           // 루비 섬 건물
+  if (z < -900 && x > 300 && shrine.blocked(x, z)) return false;     // 성소 연못 · 기둥 · 벽
   for (const c of colliders) if ((x - c.x) ** 2 + (z - c.z) ** 2 < c.r * c.r) return false;
   if (noSwim && (onIsland(x, z) || isSwimSpot(x, z))) return false;
   // 높이 차이가 크면(절벽) 못 올라가고 못 뛰어내려요. 계단은 한 칸씩이라 괜찮아요.
@@ -3913,7 +4211,7 @@ function updatePlayer(dt) {
     const p = person.position;
     if (walkable(p.x + dx * step, p.z, p.x, p.z)) p.x += dx * step;
     if (walkable(p.x, p.z + dz * step, p.x, p.z)) p.z += dz * step;
-    if (!shiftLocked || game.room) {
+    if (!shiftLocked || fixedCam()) {
       const want = Math.atan2(-dx, -dz);
       let diff = want - player.ry;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -3922,7 +4220,7 @@ function updatePlayer(dt) {
     player.walkT += dt * (game.running && !game.swimming ? 14 : 9);
   }
   // 시프트 락 중에는 항상 카메라가 보는 쪽을 바라봐요 (게 걸음 가능)
-  if ((shiftLocked || cam.fp) && !game.room && game.state !== 'reeling') player.ry = cam.yaw; // 1인칭도 보는 쪽을 바라봐요
+  if ((shiftLocked || cam.fp) && !fixedCam() && game.state !== 'reeling') player.ry = cam.yaw; // 1인칭도 보는 쪽을 바라봐요
   person.rotation.y = player.ry;
   const gy = groundY(person.position.x, person.position.z);
   const wasSwimming = game.swimming;
@@ -3983,7 +4281,8 @@ function updatePlayer(dt) {
   let shopD = Infinity;
   for (const s of shops) {
     if (s.off) continue; // 꺼진 곳 (주워 간 채집물 등)
-    const d = (person.position.x - s.pos.x) ** 2 + (person.position.z - s.pos.z) ** 2, rr = s.r || 2.4;
+    // 상호작용 거리: 쓰다듬기(pet)만 그대로, 나머지는 살짝 넉넉하게 (침대 · 의자 같은 가구도 근처에만 가면 떠요)
+    const d = (person.position.x - s.pos.x) ** 2 + (person.position.z - s.pos.z) ** 2, rr = s.kind === 'pet' ? (s.r || 2.4) : (s.r || 2.4) * 1.3 + 0.35;
     if (d < rr * rr && d < shopD) { game.nearShop = s; shopD = d; } // 제일 가까운 곳으로
   }
   // 가까운 사람 찾기 (말 걸기). 상점보다 더 가까우면 사람이 먼저예요
@@ -4306,10 +4605,10 @@ const wadeRings = [0, 1].map(() => {
 const DAY_LENGTH = 600;   // 하루 길이(초)
 let tod = 0.27;           // 처음엔 노을부터
 const PAL = {
-  day:    { bg: 0x9ccbea, fog: 0xb9d6e6, sun: 0xfff2d8, sunI: 2.6, sky: 0xeaf4ff, gnd: 0x5d6b52, hemiI: 1.5, exp: 1.0, disc: 0xfff6d8, halo: 0xfff0c0, haloO: 0.15, discY: 70, lamp: 0.3, star: 0, wisp: 0.25, water: 0x3f8a96, warm: 30, violet: 10, cloud: 0xffffff, fire: 4 },
-  sunset: { bg: 0xeca77c, fog: 0xe0a07e, sun: 0xffc18a, sunI: 2.2, sky: 0xffdfbd, gnd: 0x3d4466, hemiI: 1.6, exp: 1.08, disc: 0xffd08d, halo: 0xffba83, haloO: 0.18, discY: 18, lamp: 1.3, star: 0, wisp: 0.8, water: 0x477f82, warm: 90, violet: 40, cloud: 0xffc8b0, fire: 8 },
-  night:  { bg: 0x141634, fog: 0x1a1c40, sun: 0x8fa0ff, sunI: 0.55, sky: 0x6a78b8, gnd: 0x161624, hemiI: 0.75, exp: 1.15, disc: 0xe8ecff, halo: 0xb0c0ff, haloO: 0.12, discY: 45, lamp: 2.6, star: 1, wisp: 1, water: 0x23405a, warm: 20, violet: 75, cloud: 0x3a3e66, fire: 16 },
-  dawn:   { bg: 0xe0aac0, fog: 0xd8b0c0, sun: 0xffc8c8, sunI: 1.7, sky: 0xffe0ea, gnd: 0x4a4a6a, hemiI: 1.3, exp: 1.05, disc: 0xffd8d0, halo: 0xffc0c8, haloO: 0.16, discY: 14, lamp: 0.9, star: 0.25, wisp: 0.6, water: 0x4a7a8a, warm: 50, violet: 30, cloud: 0xffd8e4, fire: 9 }
+  day:    { zen: 0x3f7fd0, bg: 0x9ccbea, fog: 0xb9d6e6, sun: 0xfff2d8, sunI: 2.6, sky: 0xeaf4ff, gnd: 0x5d6b52, hemiI: 1.5, exp: 1.0, disc: 0xfff6d8, halo: 0xfff0c0, haloO: 0.15, discY: 70, lamp: 0.3, star: 0, wisp: 0.25, water: 0x3f8a96, warm: 30, violet: 10, cloud: 0xffffff, fire: 4 },
+  sunset: { zen: 0x4a4e9a, bg: 0xeca77c, fog: 0xe0a07e, sun: 0xffc18a, sunI: 2.2, sky: 0xffdfbd, gnd: 0x3d4466, hemiI: 1.6, exp: 1.08, disc: 0xffd08d, halo: 0xffba83, haloO: 0.18, discY: 18, lamp: 1.3, star: 0, wisp: 0.8, water: 0x477f82, warm: 90, violet: 40, cloud: 0xffc8b0, fire: 8 },
+  night:  { zen: 0x04051a, bg: 0x141634, fog: 0x1a1c40, sun: 0x8fa0ff, sunI: 0.55, sky: 0x6a78b8, gnd: 0x161624, hemiI: 0.75, exp: 1.15, disc: 0xe8ecff, halo: 0xb0c0ff, haloO: 0.12, discY: 45, lamp: 2.6, star: 1, wisp: 1, water: 0x23405a, warm: 20, violet: 75, cloud: 0x3a3e66, fire: 16 },
+  dawn:   { zen: 0x6a7ad0, bg: 0xe0aac0, fog: 0xd8b0c0, sun: 0xffc8c8, sunI: 1.7, sky: 0xffe0ea, gnd: 0x4a4a6a, hemiI: 1.3, exp: 1.05, disc: 0xffd8d0, halo: 0xffc0c8, haloO: 0.16, discY: 14, lamp: 0.9, star: 0.25, wisp: 0.6, water: 0x4a7a8a, warm: 50, violet: 30, cloud: 0xffd8e4, fire: 9 }
 };
 // 시각별 하늘: 같은 이름이 두 번 나오는 구간은 그대로 머무는 시간이에요
 const DAY_KEYS = [[0, 'day'], [0.12, 'day'], [0.22, 'sunset'], [0.34, 'sunset'], [0.44, 'night'], [0.64, 'night'], [0.72, 'dawn'], [0.8, 'dawn'], [0.9, 'day'], [1, 'day']];
@@ -4332,6 +4631,7 @@ function updateDayNight(dt) {
   const A = PAL[n0], B = PAL[n1];
   const num = (key) => A[key] + (B[key] - A[key]) * k;
   lerpHex(A.bg, B.bg, k, scene.background);
+  lerpHex(A.zen, B.zen, k, skyZen); // 머리 위 하늘색 (하늘 돔)
   lerpHex(A.fog, B.fog, k, scene.fog.color);
   lerpHex(A.sun, B.sun, k, sunsetLight.color);
   sunsetLight.intensity = num('sunI');
@@ -4398,7 +4698,7 @@ function updateCamera() {
   }
   if (teleView) { teleView = null; camera.fov = 43; camera.updateProjectionMatrix(); }
   // 집 안: 방 앞쪽 위에서 비스듬히 내려다보는 고정 시점 (모동숲처럼). 나를 따라가되 방 밖은 안 비춰요
-  if (game.room) {
+  if (fixedCam()) {
     const R = game.room, hw = R.rw / 2, hd = R.rd / 2;
     const span = Math.max(0, hw - 7.5), spanZ = Math.max(0, hd - 5.5);
     const tx = R.x + Math.max(-span, Math.min(span, p.x - R.x));
@@ -4464,8 +4764,9 @@ function updatePrompt() {
   const v = at.project(camera);
   if (v.z > 1) { ui.prompt.classList.add('hidden'); return; }
   ui.prompt.classList.remove('hidden');
-  const label = n ? `말 걸기 · ${n.name}  ·  G 선물` : s ? s.title : '모닥불 · 앉아서 굽기';
+  const label = n ? `말 걸기 · ${n.name}` : s ? s.title : '모닥불 · 앉아서 굽기';
   if (ui.promptText.textContent !== label) ui.promptText.textContent = label;
+  $('promptG').classList.toggle('hidden', !n); // 사람한테는 E 옆에 G(선물) 버튼도 보여요
   // 화면 밖으로 삐져나가지 않게 가장자리에서 멈추고, 부드럽게 따라가요
   const half = ui.prompt.offsetWidth / 2 + 8;
   const tx = Math.min(innerWidth - half, Math.max(half, (v.x * 0.5 + 0.5) * innerWidth));
@@ -4576,14 +4877,16 @@ function animate(now) {
     }
     r.fishPos += (r.target - r.fishPos) * Math.min(1, r.speed * dt);
     const inZone = r.fishPos >= r.zone && r.fishPos <= r.zone + r.zoneW;
-    r.progress = Math.min(1, r.progress + (inZone ? 0.32 * curRod().reel : -0.24) * dt);
+    r.progress = Math.min(1, r.progress + (inZone ? 0.32 * curRod().reel * (r.fill ?? 1) : -(r.lose ?? 0.24)) * dt);
     ui.zone.style.borderColor = inZone ? '#6ee07a' : '#ff8a6b';
     ui.zone.style.left = `${r.zone * 100}%`;
     ui.zone.style.width = `${r.zoneW * 100}%`;
     ui.fishIcon.style.left = `${r.fishPos * 100}%`;
     ui.prog.style.width = `${Math.max(0, r.progress) * 100}%`;
-    if (r.progress >= 1) finishCatch();
+    if (r.progress >= 1) { ui.reelBox.classList.remove('bossReel'); finishCatch(); }
     else if (r.progress <= 0) {
+      ui.reelBox.classList.remove('bossReel');
+      if (r.boss) showBanner('보스가 도망갔어요…', '연못 속으로 다시 가라앉았어요. 다시 던져서 도전해요!', '#ff8a9a', 3200);
       game.state = 'missed';
       const last = r.fish.name.charCodeAt(r.fish.name.length - 1);
       const ga = last >= 0xac00 && last <= 0xd7a3 && (last - 0xac00) % 28 ? '이' : '가'; // 받침 있으면 '이'
@@ -4743,6 +5046,7 @@ function animate(now) {
 
   updateNPCs(now, dt, t);
   updateWalkers(now, dt, t);
+  try { updateRubyNpcs(now, dt, t); } catch (e) { console.warn('[루비 섬 주민]', e); }
   multi.update(now, dt, t);
   updateWade(t);
   updateShopBoats(t);
@@ -4752,6 +5056,7 @@ function animate(now) {
   // 꾸밈 효과들: 혹시 여기서 문제가 생겨도 게임 전체가 멈추지 않게 따로 감싸요
   try { updateFishFx(t); } catch (e) { console.warn('[이로치 이펙트]', e); } // 이로치 반짝이·지직
   try { updateGlitchDay(now); } catch (e) { console.warn('[글리치의 날]', e); }
+  try { updateBloodDay(now, t); } catch (e) { console.warn('[피의 날]', e); }
   try { updateThings(t); } catch (e) { console.warn('[섬 물건]', e); }
   try { ruby.update(t); } catch (e) { console.warn('[루비 섬]', e); }
   try { life.update(dt, t, now); } catch (e) { console.warn('[생활]', e); }
@@ -4764,6 +5069,7 @@ function animate(now) {
   // '좋음'이 아니면 그림자는 두 장면에 한 번만 다시 그려요 (눈으로는 거의 똑같고 훨씬 가벼워요)
   shadowFrame++;
   renderer.shadowMap.needsUpdate = gfxNow === 'high' || shadowFrame % 2 === 0;
+  try { updateSkyDome(); } catch (e) { console.warn('[하늘]', e); }
   renderer.render(scene, camera);
 }
 
@@ -4789,11 +5095,12 @@ window.setGameState = (patch = {}) => {
   if (patch.ry !== undefined) player.ry = patch.ry;
   if (patch.yaw !== undefined) cam.yaw = patch.yaw;
   if (patch.glitch !== undefined) setGlitchDay(!!patch.glitch); // 시험용: 글리치의 날 켜고 끄기
+  if (patch.blood !== undefined) setBloodDay(!!patch.blood);    // 시험용: 피의 날 켜고 끄기
   if (patch.state === 'reeling') { game.bobberTarget.set(person.position.x, 0.18, person.position.z - 4); startReel(); }
   else if (patch.state) game.state = patch.state;
   updateUI();
 };
-window.__game = { scene, camera, renderer, player: person, fishingLine, bobber, walkers, groundY, walkable, seaWorld, museum, ruby, cam, game, save, buildRod, RODS, get room() { return game.room; } };
+window.__game = { scene, camera, renderer, player: person, fishingLine, bobber, walkers, groundY, walkable, seaWorld, museum, ruby, shrine, cam, game, save, buildRod, RODS, WATERS, RUBY_NPCS, get room() { return game.room; } };
 
 // =====================================================
 //  멀티플레이 연결 (같은 방 최대 5명)
@@ -4819,7 +5126,8 @@ function getMyState() {
   return {
     x: r2(p.x), y: r2(p.y), z: r2(p.z), r: r2(player.ry), a: myAnim(),
     rod: game.rodOut ? save.rod : -1, f: held ? held.name : null, m: held ? held.mut : null, n: save.caught, bt: game.inBoat ? save.boat : -1,
-    b: bobber.visible ? [r2(bobber.position.x), r2(bobber.position.y), r2(bobber.position.z)] : null
+    b: bobber.visible ? [r2(bobber.position.x), r2(bobber.position.y), r2(bobber.position.z)] : null,
+    pt: (typeof life !== 'undefined' && life.pets && life.pets.followers) ? life.pets.followers() : [] // 데리고 다니는 반려동물 (다른 사람 화면에도 보여요)
   };
 }
 // 왼쪽 아래 소식 (들어옴·나감·낚았어요)
@@ -4845,6 +5153,8 @@ const multi = setupMulti({
     const hud = $('multiHud');
     hud.classList.toggle('hidden', !info.connected);
     if (info.connected) hud.textContent = `멀티 · 방 ${info.room} · ${info.count}/${info.max}명`;
+    const nm = info.connected ? String(opts.name || '나').slice(0, 12) : '';
+    if (nm !== myTagName) { myTagName = nm; drawTag(save.caught); }
   }
 });
 function renderMulti() {
@@ -5327,12 +5637,14 @@ function enterRoom(h) {
   fadeMove(() => {
     camBeforeRoom = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, fp: cam.fp };
     if (cam.fp) setFirstPerson(false);
-    cam.yaw = Math.PI;
+    cam.yaw = Math.PI; // 전시관 안쪽(+z)을 보고 시작해요
+    if (h.freeCam) { cam.pitch = 0.45; cam.dist = Math.max(cam.dist, 9); }
     game.room = h; game.indoors = true; roomCam.ready = false;
     person.position.set(h.enterAt.x, groundY(h.enterAt.x, h.enterAt.z), h.enterAt.z);
     player.ry = Math.PI; person.rotation.y = player.ry;
     if (h.museum) museum.refresh();
-    game.notice = `${h.name}에 들어왔어요. 어항 앞에서 E 로 물고기를 기증해요. 문 앞 매트를 밟으면 밖으로 나가요.`; updateUI();
+    game.notice = h.enterMsg || `${h.name}에 들어왔어요. 문 앞 매트를 밟으면 밖으로 나가요.`; updateUI();
+    if (h.id === 'shrine') shrineEntered();
   });
 }
 function exitHouse(h, now) {
@@ -5514,6 +5826,16 @@ function designList(h) {
   wrap.appendChild(grid);
   return wrap;
 }
+// 위험한 버튼은 한 번 눌러서 "정말?" 으로 바뀐 뒤, 5초 안에 한 번 더 눌러야 실행돼요 (확인창 대신)
+function armTwice(btn, askText) {
+  if (btn.dataset.armed === '1') { btn.dataset.armed = ''; clearTimeout(btn._armT); return true; }
+  btn.dataset.armed = '1';
+  btn.dataset.label = btn.dataset.label || btn.textContent;
+  btn.textContent = askText; btn.style.background = '#a8302a';
+  clearTimeout(btn._armT);
+  btn._armT = setTimeout(() => { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; btn.style.background = ''; }, 5000);
+  return false;
+}
 function openHouse(h) {
   const box = $('houseInfo');
   const own = houseOwned(h);
@@ -5542,7 +5864,8 @@ function openHouse(h) {
     sell.style.marginTop = '10px';
     sell.textContent = `집 내놓기 (${money(Math.floor(h.price / 2))} 돌려받기)`;
     sell.onclick = async () => {
-      if (!confirm(`${h.name}을(를) 내놓을까요?\n\n${money(Math.floor(h.price / 2))}을 돌려받고, 어항 물고기는 가방으로 돌아와요. 다른 사람이 살 수 있게 돼요.`)) return;
+      // 브라우저가 확인창을 막아 두면 confirm 이 아무 말 없이 '아니요'가 돼서 버튼이 안 눌린 것처럼 보였어요 → 한 번 더 누르기로 확인
+      if (!armTwice(sell, `정말 내놓을까요? 한 번 더 누르면 내놓아요 (${money(Math.floor(h.price / 2))} 돌려받기 · 어항 물고기는 가방으로)`)) return;
       if (myUid() && houseOwners && houseOwners[h.id] && houseOwners[h.id].owner === myUid()) {
         try { await releaseHouse(h.id); } catch (e) { game.notice = '집을 내놓지 못했어요. 인터넷 연결을 확인해 주세요.'; updateUI(); return; }
       }
@@ -5568,11 +5891,7 @@ function openHouse(h) {
     btn.onclick = async () => {
       const fishN = (save.tanks[old.id] || []).length, newSlots = HOUSE_INFO[h.id].slots;
       const extra = Math.max(0, fishN - newSlots);
-      if (!confirm(`${old.name} → ${h.name}(으)로 이사할까요?
-
-${cost >= 0 ? money(cost) + '을 더 내요' : money(-cost) + '을 돌려받아요'} (새 집 값 − 지금 집 반값)
-어항 물고기 ${fishN}마리와 집 디자인을 그대로 옮겨요.${extra ? `
-새 어항은 ${newSlots}칸이라 ${extra}마리는 가방으로 가요.` : ''}`)) return;
+      if (!armTwice(btn, `정말 ${h.name}(으)로 이사할까요? 한 번 더 누르면 이사해요 (어항 물고기 ${fishN}마리 · 디자인도 같이${extra ? ` · ${extra}마리는 가방으로` : ''})`)) return;
       if (save.money < cost || houseOwned(h)) return;
       btn.disabled = true; btn.textContent = '이사하는 중…';
       if (cloudEnabled) {
@@ -5772,8 +6091,9 @@ function openSeal(i) {
   const S = SEALS[i], have = save.ruby[S.id] || 0, done = have >= S.need;
   $('museumTitle').textContent = `루비 신전 · ${S.name}`;
   const body = $('museumBody');
-  body.innerHTML = `<div class="count">${done ? `<b style="color:#9affb0">봉인이 풀렸어요!</b> 루비 공방에서 <b>${esc(S.rod)}</b>을(를) 살 수 있어요.`
-    : `제단에 <b style="color:#ff8a9a">[${S.mut}] ${esc(S.fish)}</b>를 <b>${S.need}마리</b> 바치면 봉인이 풀려요. 지금 ${have} / ${S.need}마리.<br>이로치가 여러 개 겹친 물고기도 ${S.mut}가 섞여 있으면 돼요. 아주아주 드물어요!`}</div>`;
+  const bossDone = !!save.ruby.boss[S.id];
+  body.innerHTML = `<div class="count">${done && !doorOpen() ? `<b style="color:#9affb0">이 봉인은 풀렸어요!</b> 반대쪽 제단의 봉인도 풀어야 신전 문이 열려요.` : done ? (bossDone ? `<b style="color:#9affb0">봉인도 풀고 보스도 낚았어요!</b> 루비 공방에서 <b>${esc(S.rod)}</b>을(를) 살 수 있어요.` : `<b style="color:#9affb0">봉인이 풀렸어요!</b> 신전 문이 열렸어요. 문 안 <b>성소 연못</b>에서 보스 <b style="color:#ff8a9a">「${esc(S.boss)}」</b>를 낚으면 <b>${esc(S.rod)}</b>을(를) 살 수 있어요.`)
+    : `제단에 <b style="color:#ff8a9a">[${S.mut}] ${esc(S.fish)}</b>를 <b>${S.need}마리</b> 바치면 봉인이 풀려요. 지금 ${have} / ${S.need}마리.<br>이로치가 여러 개 겹친 물고기도 ${S.mut}가 섞여 있으면 돼요. 봉인을 풀면 신전 문이 열리고, 안쪽 성소에서 보스를 낚아야 낚싯대를 살 수 있어요.`}</div>`;
   if (!done) {
     const fit = save.inv.filter((it) => sealFits(it, S));
     body.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 속 맞는 물고기 (${fit.length}마리)</h3>`);
@@ -5783,8 +6103,15 @@ function openSeal(i) {
       save.inv = save.inv.filter((x) => x !== it);
       save.ruby[S.id] = Math.min(S.need, (save.ruby[S.id] || 0) + 1);
       if (save.ruby[S.id] >= S.need) {
-        game.notice = `${S.name}이(가) 풀렸어요! 루비 공방에서 ${S.rod}을(를) 팔기 시작했어요.`;
-        tone(392, 0.3, 'triangle', 0.08); tone(587, 0.3, 'triangle', 0.08, 0.2); tone(784, 0.5, 'triangle', 0.08, 0.4);
+        if (doorOpen()) {
+          game.notice = `봉인 2개가 모두 풀렸어요! 신전 문이 열렸어요 — 성소 연못의 보스를 낚아야 낚싯대를 살 수 있어요.`;
+          showBanner('봉인이 모두 풀렸다!', `쿠구구… 루비 신전의 문이 열렸어요. 안쪽 성소 연못에 보스 「${pendingBoss() ? pendingBoss().boss : S.boss}」가 깨어났어요!`, '#ffd84a', 6000);
+          game.shake = { until: performance.now() + 1400, mag: 0.1 };
+        } else {
+          game.notice = `${S.name}이(가) 풀렸어요! 반대쪽 제단의 봉인도 풀면 신전 문이 열려요.`;
+          showBanner(`${S.name}이 풀렸다!`, '사슬 하나가 끊어졌어요… 반대쪽 제단의 봉인도 풀면 신전 문이 열려요.', '#ffd84a', 5000);
+        }
+        tone(392, 0.3, 'triangle', 0.08); tone(587, 0.3, 'triangle', 0.08, 0.2); tone(784, 0.5, 'triangle', 0.08, 0.4); tone(98, 1.4, 'sawtooth', 0.05, 0.1);
       }
       ruby.setSeals(save);
       writeSave(); renderHotbar(); updateUI(); openSeal(sealOpen);
@@ -5793,8 +6120,191 @@ function openSeal(i) {
   openPanel(museumPanel);
 }
 // 정기선: 화면이 까매졌다가 반대편 선착장으로
+// =====================================================
+//  루비 신전 성소 · 보스
+//   봉인 풀기(물고기 1마리) → 신전 문 열림 + 빛기둥 → 문 앞 E 로 성소 → 연못에서 보스 낚기 → 공방에서 낚싯대 구매
+//   처음 하는 사람도 알 수 있게: 큰 글자 알림(배너) · 왼쪽 위 할 일 줄 · 연못 속 보스 그림자 · 보스 등장 연출
+// =====================================================
+const sealDone = (S) => (save.ruby[S.id] || 0) >= S.need;
+const doorOpen = () => SEALS.every(sealDone); // 봉인 2개를 모두 풀어야 신전 문이 열려요
+const pendingBoss = () => (doorOpen() ? SEALS.find((S) => !save.ruby.boss[S.id]) || null : null);
+const rodUnlocked = (r) => { const S = r.seal && SEALS.find((q) => q.id === r.seal); return !S || (doorOpen() && !!save.ruby.boss[S.id]); };
+// 화면 가운데 큰 글자 알림
+const bannerEl = (() => {
+  const el = document.createElement('div');
+  el.id = 'bigBanner';
+  el.style.cssText = 'position:fixed;left:50%;top:36%;transform:translate(-50%,-50%) scale(.9);z-index:60;text-align:center;pointer-events:none;opacity:0;transition:opacity .5s,transform .5s;font-family:Jua,"Malgun Gothic",sans-serif;text-shadow:0 3px 12px rgba(0,0,0,.85);max-width:86vw';
+  document.body.appendChild(el);
+  return el;
+})();
+let bannerTimer = 0;
+function showBanner(title, sub, color = '#ffd84a', ms = 4000) {
+  bannerEl.innerHTML = `<div style="font-size:46px;color:${color};letter-spacing:2px">${esc(title)}</div><div style="font-size:21px;color:#fff;margin-top:8px">${esc(sub)}</div>`;
+  bannerEl.style.opacity = '1'; bannerEl.style.transform = 'translate(-50%,-50%) scale(1)';
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { bannerEl.style.opacity = '0'; bannerEl.style.transform = 'translate(-50%,-50%) scale(.9)'; }, ms);
+}
+// 왼쪽 위 할 일 줄 (보스가 기다리는 동안 계속 떠 있어요)
+const bossHud = (() => {
+  const el = document.createElement('div');
+  el.id = 'bossHud'; el.className = 'rodName hidden';
+  el.style.cssText = 'color:#ff9aa8;font-weight:700';
+  ($('buffLine') || $('clock')).after(el);
+  return el;
+})();
+function updateBossHud() {
+  const S = pendingBoss();
+  const text = S ? `할 일: 루비 신전 성소 연못에서 보스 「${S.boss}」 낚기 (루비 낚싯대)` : '';
+  if (bossHud.textContent !== text) bossHud.textContent = text;
+  bossHud.classList.toggle('hidden', !S);
+}
+function openShrineDoor() {
+  if (!doorOpen()) {
+    const n = SEALS.filter(sealDone).length;
+    game.notice = n ? `봉인이 하나 풀렸지만 아직 사슬이 남아 있어요. 나머지 봉인도 풀어야 문이 열려요 (${n} / ${SEALS.length}).` : '사슬로 굳게 잠긴 문이에요. 문 양옆 제단의 봉인 2개를 모두 풀어야 열려요 (제단 앞에서 E).';
+    tone(160, 0.25, 'square', 0.04); updateUI(); return;
+  }
+  enterRoom(shrine.room);
+}
+function shrineEntered() {
+  const S = pendingBoss();
+  if (S) showBanner('성소', `연못 속에 보스 「${S.boss}」의 그림자가 맴돌고 있어요. 루비 낚싯대로 연못에 던져 보세요!`, '#ff6a7a', 5500);
+  else showBanner('성소', '연못이 고요해요. 지금은 깨어난 보스가 없어요. (보통 루비 물고기가 낚여요)', '#ffd8b0', 4000);
+}
+function bossAppears(f) {
+  showBanner('보스 등장!', `「${f.name}」 — 지금까지 중 제일 사나워요! 꾹 버텨요!`, '#ff3a4a', 3200);
+  game.shake = { until: performance.now() + 1500, mag: 0.18 };
+  tone(110, 0.8, 'sawtooth', 0.07); tone(82, 1.2, 'sawtooth', 0.06, 0.25); tone(147, 0.6, 'square', 0.04, 0.6);
+}
+function bossCaught(f) {
+  const S = SEALS.find((q) => q.id === f.boss);
+  if (!S) return;
+  save.ruby.boss[S.id] = true;
+  writeSave(); ruby.setSeals(save); updateBossHud();
+  try { showShrineRod(SEALS.indexOf(S), true); } catch (e) { console.warn('[성소 낚싯대]', e); }
+  showBanner('보스를 낚았어요!!', `「${f.name}」을(를) 쓰러뜨렸어요. 이제 루비 공방에서 「${S.rod}」을(를) 살 수 있어요!`, '#9affb0', 7000);
+  game.notice = `보스 「${f.name}」을(를) 낚았어요! 루비 공방에서 ${S.rod}을(를) 팔기 시작했어요.`;
+  tone(523, 0.2, 'triangle', 0.08); tone(659, 0.2, 'triangle', 0.08, 0.15); tone(784, 0.2, 'triangle', 0.08, 0.3); tone(1047, 0.6, 'triangle', 0.08, 0.45);
+}
+// =====================================================
+//  루비 섬 주민 부탁 (평균 보상 약 10억)
+// =====================================================
+function newRubyQuest(n) {
+  const pool = FISH.filter((f) => f.zone === 'ruby' && n.kind.includes(f.rarity));
+  const f = pool[Math.floor(Math.random() * pool.length)];
+  const reward = Math.round(n.base * (0.6 + Math.random() * 0.8) / 1e6) * 1e6;
+  return { fish: f.name, mut: !!n.mut, reward };
+}
+const questFits = (it, q) => it.name === q.fish && (!q.mut || !!it.mut);
+let rubyQuestNpc = null; // 지금 부탁 창을 연 주민 (창이 열린 동안 그 주민은 나를 봐요)
+function openRubyQuest(n) {
+  rubyQuestNpc = n;
+  let q = save.ruby.q[n.id];
+  if (!q) { q = save.ruby.q[n.id] = newRubyQuest(n); writeSave(); }
+  $('museumTitle').textContent = n.name;
+  const body = $('museumBody');
+  const line = n.lines[Math.floor(Math.random() * n.lines.length)];
+  body.innerHTML = `<div class="count">"${esc(line)}"<br><br>부탁: <b style="color:#ff8a9a">${q.mut ? '이로치가 붙은 ' : ''}${esc(q.fish)}</b> 한 마리 · 보상 <b style="color:#ffd84a">${money(q.reward)}</b><br><span style="color:#aaa">루비 바다 · 루비 호수에서 루비 공방 낚싯대로 낚을 수 있어요. 지금까지 들어준 부탁 ${save.ruby.qDone}개</span></div>`;
+  const fit = save.inv.filter((it) => questFits(it, q));
+  body.insertAdjacentHTML('beforeend', `<h3 class="chartH">가방 속 맞는 물고기 (${fit.length}마리)</h3>`);
+  if (!fit.length) body.insertAdjacentHTML('beforeend', '<div class="count">아직 없어요.</div>');
+  for (const it of fit) body.appendChild(museumRow(it, [['건네주기', () => {
+    if (game.selected === it.id) equip(null);
+    save.inv = save.inv.filter((x) => x !== it);
+    save.money = Math.min(MAX_MONEY, save.money + q.reward);
+    save.ruby.qDone++;
+    game.notice = `${n.name}: "고마워요!" 보상 ${money(q.reward)}을 받았어요.`;
+    showBanner('부탁 완료!', `${n.name}에게 ${money(q.reward)}을 받았어요`, '#ffd84a', 3000);
+    sfx.coin && sfx.coin();
+    save.ruby.q[n.id] = newRubyQuest(n);
+    writeSave(); renderHotbar(); updateUI(); openRubyQuest(n);
+  }]]));
+  const re = document.createElement('button');
+  re.className = 'actBtn'; re.style.marginTop = '10px'; re.textContent = '다른 부탁 듣기';
+  re.onclick = () => { save.ruby.q[n.id] = newRubyQuest(n); writeSave(); openRubyQuest(n); };
+  body.appendChild(re);
+  openPanel(museumPanel);
+}
+// ---------- 보스를 잡으면: 성소 제단 앞에 그 낚싯대가 기대어 나타나요 ----------
+//  가루(빛 알갱이)가 사방에서 모여들다가 → 낚싯대 모양으로 반짝 생겨나요. 다음부터는 그냥 놓여 있어요
+const shrineRods = SEALS.map((S, i) => {
+  const r = RODS.find((q) => q.name === S.rod);
+  const holder = new THREE.Group(); holder.userData.dynamic = true;
+  // 제단 첫 계단(높이 0.5) 위에 세우고, 둘째 계단 모서리(앞 z1-6, 높이 1.0)와 용 머리에 기대요 (윗부분이 제단 쪽 +z)
+  const tilt = 0.3, bx = shrine.room.x + (i ? 2.4 : -2.4), by = shrine.room.floorY + 0.5, bz = shrine.room.z1 - 6.15;
+  holder.position.set(bx, by + Math.cos(tilt) * ROD_LEN / 2, bz + Math.sin(tilt) * ROD_LEN / 2);
+  holder.rotation.set(tilt, 0, 0);
+  const sp = r ? buildRod(r, holder) : [];
+  holder.visible = false; scene.add(holder);
+  return { holder, sp, fx: null, base: holder.position.clone() };
+});
+const rodDustM = new THREE.MeshBasicMaterial({ color: 0xffd8a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+function showShrineRod(i, animate) {
+  const sr = shrineRods[i];
+  if (!sr) return;
+  sr.holder.visible = true;
+  if (!animate) { sr.holder.scale.setScalar(1); return; }
+  // 가루 90개: 반지름 4~7칸 공 모양에서 낚싯대의 여러 점으로 빨려 들어가요
+  const dust = [];
+  for (let k = 0; k < 90; k++) {
+    const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.05 + Math.random() * 0.05, 0), rodDustM);
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), rr = 4 + Math.random() * 3;
+    const from = sr.base.clone().add(new THREE.Vector3(Math.sin(ph) * Math.cos(th) * rr, Math.abs(Math.cos(ph)) * rr * 0.8, Math.sin(ph) * Math.sin(th) * rr));
+    const along = (Math.random() - 0.5) * ROD_LEN;
+    const to = sr.holder.localToWorld(new THREE.Vector3(0, along, 0));
+    m.position.copy(from); m.userData.dynamic = true; scene.add(m);
+    dust.push({ m, from, to, delay: Math.random() * 0.8 });
+  }
+  sr.fx = { t: 0, dust };
+  sr.holder.scale.setScalar(0.001);
+  tone(660, 1.6, 'sine', 0.03); tone(990, 1.4, 'sine', 0.025, 0.4); tone(1320, 0.8, 'triangle', 0.03, 1.8);
+}
+function updateShrineRods(dt, t) {
+  for (const sr of shrineRods) {
+    if (!sr.holder.visible) continue;
+    placeSpin(sr.sp, t);
+    if (!sr.fx) continue;
+    const f = sr.fx; f.t += dt;
+    for (const d of f.dust) {
+      const q = Math.min(1, Math.max(0, (f.t - d.delay) / 1.6)), e = q * q * (3 - 2 * q);
+      d.m.position.lerpVectors(d.from, d.to, e);
+      d.m.position.y += Math.sin(q * Math.PI) * 0.8;
+      d.m.rotation.set(t * 4, t * 3, 0);
+      d.m.scale.setScalar(q >= 1 ? Math.max(0.001, 1 - (f.t - d.delay - 1.6) * 3) : 1);
+    }
+    const s = Math.min(1, Math.max(0, (f.t - 1.8) / 0.7)); // 가루가 다 모이면 낚싯대가 반짝 커지며 생겨요
+    sr.holder.scale.setScalar(Math.max(0.001, s * (1 + Math.sin(s * Math.PI) * 0.15)));
+    if (f.t > 3.2) { for (const d of f.dust) scene.remove(d.m); sr.fx = null; sr.holder.scale.setScalar(1); }
+  }
+}
+// 정기선 표지판 글자를 지금 상태에 맞게
+function syncFerry() {
+  for (const s of shops) if (s.kind === 'ferry') {
+    s.title = s.to === 'ruby' ? (save.ruby.ferry ? '루비 섬 정기선 · 타기 (E)' : '루비 섬 정기선 · 아직 잠겨 있어요 (E)')
+      : (save.ruby.ferry ? '정기선 · 모래사장 부두로 돌아가기 (E)' : '정기선 열기 · 이제 부두에서 바로 올 수 있어요 (E)');
+  }
+}
+// 루비 섬에 처음 발을 디디면 "발견" (매 장면 updateHouses 쯤에서 불러요)
+function checkRubyFound() {
+  if (save.ruby.found || game.room) return;
+  const p = person.position;
+  if (!onRuby(p.x, p.z)) return;
+  save.ruby.found = true;
+  game.notice = '루비 섬을 발견했어요! 선착장의 정기선 표지판에서 E 를 누르면 정기선을 열 수 있어요.';
+  tone(523, 0.2, 'triangle', 0.07); tone(784, 0.3, 'triangle', 0.07, 0.15);
+  writeSave(); updateUI();
+}
 function useFerry(to) {
   if (game.inBoat) return;
+  if (!save.ruby.ferry) {
+    if (to === 'ruby') { game.notice = '정기선이 아직 잠겨 있어요. 보트를 타고 큰 바다 남쪽 해협을 지나 루비 섬을 먼저 찾아 주세요. 루비 섬 선착장에서 정기선을 열 수 있어요.'; updateUI(); return; }
+    // 루비 섬 선착장: 여기서 정기선을 열어요 (열기만 하고 바로 떠나지는 않아요)
+    save.ruby.ferry = true; save.ruby.found = true;
+    game.notice = '정기선이 열렸어요! 이제 모래사장 부두 끝에서 언제든 루비 섬으로 올 수 있어요. (한 번 더 E 를 누르면 돌아가요)';
+    tone(392, 0.2, 'triangle', 0.07); tone(523, 0.2, 'triangle', 0.07, 0.12); tone(784, 0.35, 'triangle', 0.07, 0.24);
+    writeSave(); syncFerry(); updateUI();
+    return;
+  }
   if (game.state === 'casting' || game.state === 'bite' || game.state === 'retracting') retract(true);
   fadeMove(() => {
     const at = to === 'ruby' ? ruby.arriveAt : { x: FERRY_HOME.x, z: FERRY_HOME.z - 2.5 };
@@ -5845,6 +6355,10 @@ function updateIslandHud(now) {
   el.classList.remove('hidden');
 }
 function updateHouses(t) {
+  checkRubyFound();
+  updateShrineRods(1 / 60, t);
+  updateBossHud();
+  shrine.update(t, game.room === shrine.room, !!pendingBoss());
   const inMuseum = game.room === museum.room;
   if (inMuseum) rainLines.visible = false;
   museum.update(t, inMuseum, roomCam.t);
@@ -5875,6 +6389,8 @@ const life = setupLife({
   THREE, scene, save, writeSave, money, $, openPanel, closePanels, modalOpen, registerPanel: (el) => extraPanels.push(el),
   get person() { return person; }, player, game, shops, colliders, seaWorld, makeShop, tone, sfx, updateUI, groundY, inLake, onIsland, onPlateau, isNight, esc, mat,
   walkers, npcs, findFish, makeFishModel, fishScale, makeBlockPerson, softBuff, renderHotbar, cam, multi: () => multi,
+  banner: (a, b, c, ms) => showBanner(a, b, c, ms),
+  giveRod: (name) => { const i = RODS.findIndex((r) => r.name === name); if (i < 0 || save.owned.includes(i)) return false; save.owned.push(i); save.owned.sort((a, b) => a - b); return true; }, // 도감 보상 낚싯대
   getTod: () => tod, setTod: (v) => { tod = v; }, equip, isRaining, bobber, waterMat, camera, sayLine, campfire, waterY: LAKE.y
 });
 if (window.__game) window.__game.life = life; // 테스트용으로 들여다보기
@@ -5887,6 +6403,8 @@ function updateShopBoats(t) {
 applyRod();
 museum.refresh(); // 박물관 이름판 · 기증한 물고기
 ruby.setSeals(save); // 루비 신전 봉인 (풀린 봉인은 불이 꺼져요)
+syncFerry();         // 정기선 열렸는지
+SEALS.forEach((S, i) => { if (save.ruby.boss[S.id]) showShrineRod(i, false); }); // 이미 잡은 보스의 낚싯대는 성소 제단 앞에
 rebuildHero(save.outfit); // 저장해 둔 옷 입기
 renderHotbar();
 updateQuestHud();

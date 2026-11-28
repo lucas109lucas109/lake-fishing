@@ -9,6 +9,7 @@
 // =====================================================
 import { DecoBatch } from './seaworld.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { fmtMoney } from './money.js';
 
 export const MUSEUM_REWARD = 100000000;
 // 바깥 건물 한가운데 (정면 = 서쪽, 마을을 봐요)
@@ -507,7 +508,7 @@ export function buildMuseum(ctx) {
     g.fillStyle = '#eee4cc'; g.fillRect(0, 0, 512, 180);
     g.fillStyle = '#4a3a22'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = '64px "Jua", "Malgun Gothic", sans-serif'; g.fillText('노을 박물관 가는 길', 256, 70);
-    g.font = '30px "Jua", "Malgun Gothic", sans-serif'; g.fillText('모든 물고기 어항을 채우면 $100,000,000', 256, 140);
+    g.font = '30px "Jua", "Malgun Gothic", sans-serif'; g.fillText(`모든 물고기 어항을 채우면 ${fmtMoney(MUSEUM_REWARD)}`, 256, 140);
     const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
     for (const side of [-1, 1]) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.63), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }));
@@ -849,6 +850,13 @@ export function buildMuseum(ctx) {
     shops.push({ kind: 'mtank', tank, title: '', group: museumGroup, pos: new THREE.Vector3(cx, FLOOR, zA - 1.1), promptAt: new THREE.Vector3(cx, yb + TH + 0.8, zA), r: Math.max(1.3, Math.min(4, L / 2)) });
   };
   const museumGroup = new THREE.Group(); museumGroup.userData.dynamic = true; scene.add(museumGroup);
+  // 카메라 막이 (안 보이는 벽): 박물관 안은 평소 시점이라, 카메라가 벽 밖 까만 곳으로 나가지 않게 앞뒤옆 벽 · 칸막이에 걸려요
+  //  (main.js 카메라가 상점 그룹을 레이캐스트해요 — 어항 앞 E 자리들이 이 그룹을 써요)
+  {
+    const inv = new THREE.MeshBasicMaterial({ visible: false });
+    const wall = (cx, cz, sx, sz) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, 14, sz), inv); m.position.set(cx, FLOOR + 7, cz); museumGroup.add(m); };
+    wall(IN_X, rz1, RW + 2, 0.6); wall(IN_X, rz0, RW + 2, 0.6); wall(rx0, (rz0 + rz1) / 2, 0.6, RD + 2); wall(rx1, (rz0 + rz1) / 2, 0.6, RD + 2);
+  }
   let idx = 0;
   for (const h of halls) for (const t of h.list) makeTank(t, h, idx++);
   // 통로 벤치 (홀 안 빈자리에 · 앞뒤 어항과 안 겹치게)
@@ -926,7 +934,7 @@ export function buildMuseum(ctx) {
     g.fillStyle = '#4a3a30'; g.fillRect(112, 262, 800, 40);
     g.fillStyle = '#d8b040'; g.fillRect(112, 262, 800 * n / total, 40);
     g.fillStyle = '#ffe8c0'; g.font = '40px "Jua", "Malgun Gothic", sans-serif';
-    g.fillText(ctx.save.museum.paid ? '보상을 받았어요! 고마워요' : `모든 어항을 채우면 $${MUSEUM_REWARD.toLocaleString('en-US')}`, 512, 350);
+    g.fillText(ctx.save.museum.paid ? '보상을 받았어요! 고마워요' : `모든 어항을 채우면 ${fmtMoney(MUSEUM_REWARD)}`, 512, 350);
     boardTex.needsUpdate = true;
   };
   // 기증한 물고기 모형 (실제 크기 그대로)
@@ -956,7 +964,8 @@ export function buildMuseum(ctx) {
   };
 
   const room = {
-    id: 'museum', name: '노을 박물관', museum: true,
+    id: 'museum', name: '노을 박물관', museum: true, freeCam: true, // freeCam = 평소 시점 (마우스로 돌리고 휠로 확대)
+    enterMsg: '노을 박물관에 들어왔어요. 어항 앞에서 E 로 물고기를 기증해요. 문 앞 매트를 밟으면 밖으로 나가요.',
     x: IN_X, z: (rz0 + rz1) / 2, x0: rx0, x1: rx1, z0: rz0, z1: rz1, rw: RW, rd: RD, floorY: FLOOR,
     exitAt: { x: IN_X, z: rz0 + 0.55 }, enterAt: { x: IN_X, z: rz0 + 2.4 },
     // 바깥 문 (정면 = 서쪽): 문 앞에서 동쪽(+x)으로 걸어가면 들어가요 / 나오면 계단 앞에 서쪽을 보고 서요

@@ -42,30 +42,35 @@ const MAX_HEART = 10;
 const RARITY_GIFT = { common: 15, uncommon: 30, rare: 50, legendary: 85, mythic: 120 };
 
 // ---------------- 도감 보상 ----------------
-const ZONE_NAME = { lake: '큰 호수', mountain: '산 위 연못', aurora: '오로라 강', sea: '바다', jungle: '정글', rain: '비 오는 날', season: '사계절' };
+const ZONE_NAME = { lake: '큰 호수', mountain: '산 위 연못', aurora: '오로라 강', sea: '바다', jungle: '정글', ruby: '루비 섬', rain: '비 오는 날', season: '사계절' };
 const groupOf = (f) => (f.season ? 'season' : f.weather ? 'rain' : zoneOf(f));
 function dexGoals() {
   const total = FISH.length;
   const n = (save) => FISH.filter((f) => save.dex[f.name]).length;
   const goals = [
-    { id: 'd10', name: '물고기 10종 모으기', need: 10, get: n, money: 5000, title: '새내기 낚시꾼' },
-    { id: 'd25', name: '물고기 25종 모으기', need: 25, get: n, money: 20000, furn: 'rainbow_lamp' },
-    { id: 'd40', name: '물고기 40종 모으기', need: 40, get: n, money: 50000, furn: 'fish_statue', title: '물고기 박사' },
-    { id: 'd60', name: '물고기 60종 모으기', need: 60, get: n, money: 150000, furn: 'dex_shelf' },
-    { id: 'd80', name: '물고기 80종 모으기', need: 80, get: n, money: 400000, furn: 'gyotaku', title: '전설의 어부' },
-    { id: 'd100', name: '물고기 100종 모으기', need: 100, get: n, money: 1000000, furn: 'king_trophy', title: '낚시왕' },
-    { id: 'dall', name: `도감 완성 (${total}종 전부)`, need: total, get: n, money: 5000000, furn: 'aurora_globe', title: '호수의 주인', luck: 0.03 }
+    // 보상을 크게 늘렸어요 (돈 · 가구 · 칭호 · 낚싯대). rod = 그 낚싯대를 공짜로 받아요 (이미 있으면 돈만)
+    { id: 'd10', name: '물고기 10종 모으기', need: 10, get: n, money: 100000, rod: '별빛 낚싯대', title: '새내기 낚시꾼' },
+    { id: 'd25', name: '물고기 25종 모으기', need: 25, get: n, money: 500000, rod: '솜사탕 낚싯대', furn: 'rainbow_lamp' },
+    { id: 'd40', name: '물고기 40종 모으기', need: 40, get: n, money: 2000000, rod: '은하수 낚싯대', furn: 'fish_statue', title: '물고기 박사' },
+    { id: 'd60', name: '물고기 60종 모으기', need: 60, get: n, money: 8000000, rod: '심해왕의 삼지창', furn: 'dex_shelf' },
+    { id: 'd80', name: '물고기 80종 모으기', need: 80, get: n, money: 30000000, rod: '덩굴 낚싯대', furn: 'gyotaku', title: '전설의 어부' },
+    { id: 'd100', name: '물고기 100종 모으기', need: 100, get: n, money: 100000000, rod: '황금 신전 낚싯대', furn: 'king_trophy', title: '낚시왕' },
+    { id: 'd110', name: '물고기 110종 모으기', need: 110, get: n, money: 300000000, rod: '정글 왕의 낚싯대' },
+    { id: 'd120', name: '물고기 120종 모으기', need: 120, get: n, money: 1000000000, rod: '루비 낚싯대', title: '보석 사냥꾼' },
+    { id: 'dall', name: `도감 완성 (${total}종 전부)`, need: total, get: n, money: 5000000000, rod: '석류석 낚싯대', furn: 'aurora_globe', title: '호수의 주인', luck: 0.03 }
   ].filter((g, i, arr) => g.need <= total || g.id === 'dall');
-  const zoneTitles = { lake: '큰 호수 지킴이', mountain: '산 위의 신선', aurora: '오로라 탐험가', sea: '바다 사나이', jungle: '정글 탐험대', rain: '비를 부르는 자', season: '사계절 낚시꾼' };
-  const zoneMoney = { lake: 30000, mountain: 60000, aurora: 120000, sea: 200000, jungle: 600000, rain: 80000, season: 250000 };
+  const zoneTitles = { lake: '큰 호수 지킴이', mountain: '산 위의 신선', aurora: '오로라 탐험가', sea: '바다 사나이', jungle: '정글 탐험대', ruby: '루비의 주인', rain: '비를 부르는 자', season: '사계절 낚시꾼' };
+  const zoneMoney = { lake: 600000, mountain: 1200000, aurora: 3000000, sea: 5000000, jungle: 30000000, ruby: 2000000000, rain: 2000000, season: 8000000 };
+  const zoneRod = { lake: '노을빛 낚싯대', mountain: '용암 낚싯대', aurora: '오로라 낚싯대', sea: '심해왕의 삼지창', jungle: '정글 왕의 낚싯대', ruby: '진홍 용비늘 낚싯대', rain: '그림자 낚싯대', season: '산호 낚싯대' };
   for (const z of Object.keys(ZONE_NAME)) {
     const list = FISH.filter((f) => groupOf(f) === z);
     if (!list.length) continue;
-    goals.push({ id: 'z_' + z, name: `${ZONE_NAME[z]} 물고기 전부 (${list.length}종)`, need: list.length, get: (save) => list.filter((f) => save.dex[f.name]).length, money: zoneMoney[z], title: zoneTitles[z] });
+    goals.push({ id: 'z_' + z, name: `${ZONE_NAME[z]} 물고기 전부 (${list.length}종)`, need: list.length, get: (save) => list.filter((f) => save.dex[f.name]).length, money: zoneMoney[z], rod: zoneRod[z], title: zoneTitles[z] });
   }
-  goals.push({ id: 'c100', name: '물고기 100마리 낚기', need: 100, get: (save) => save.caught, money: 10000 });
-  goals.push({ id: 'c1000', name: '물고기 1000마리 낚기', need: 1000, get: (save) => save.caught, money: 200000, title: '낚시 중독' });
-  goals.push({ id: 'c5000', name: '물고기 5000마리 낚기', need: 5000, get: (save) => save.caught, money: 2000000, title: '호수의 전설' });
+  goals.push({ id: 'c100', name: '물고기 100마리 낚기', need: 100, get: (save) => save.caught, money: 300000 });
+  goals.push({ id: 'c1000', name: '물고기 1000마리 낚기', need: 1000, get: (save) => save.caught, money: 5000000, title: '낚시 중독' });
+  goals.push({ id: 'c5000', name: '물고기 5000마리 낚기', need: 5000, get: (save) => save.caught, money: 50000000, title: '호수의 전설' });
+  goals.push({ id: 'c20000', name: '물고기 20000마리 낚기', need: 20000, get: (save) => save.caught, money: 1000000000, title: '바다를 비운 자' });
   return goals;
 }
 
@@ -217,6 +222,7 @@ export function setupFriends(ctx) {
     R.dex.push(g.id);
     const got = [];
     if (g.money) { save.money += g.money; got.push(money(g.money)); }
+    if (g.rod && ctx.giveRod) { const ok = ctx.giveRod(g.rod); got.push(ok ? `낚싯대 「${g.rod}」` : `(「${g.rod}」은 이미 있어요)`); }
     if (g.furn) { save.furn[g.furn] = (save.furn[g.furn] || 0) + 1; got.push(`가구 「${findFurniture(g.furn)?.name}」`); }
     if (g.title && !save.titles.includes(g.title)) { save.titles.push(g.title); got.push(`칭호 「${g.title}」`); }
     if (g.luck) got.push(`낚시 운 +${Math.round(g.luck * 100)}% (계속)`);
@@ -266,7 +272,7 @@ export function setupFriends(ctx) {
       bb.innerHTML = `<div class="count">모은 물고기 ${got} / ${FISH.length}종 · 낚은 물고기 ${save.caught}마리</div>`;
       for (const g of GOALS) {
         const cur = Math.min(g.need, g.get(save)), done = cur >= g.need, claimed = R.dex.includes(g.id);
-        const gifts = [g.money ? money(g.money) : '', g.furn ? `「${findFurniture(g.furn)?.name}」` : '', g.title ? `칭호 「${g.title}」` : '', g.luck ? `운 +${Math.round(g.luck * 100)}%` : ''].filter(Boolean).join(' · ');
+        const gifts = [g.money ? money(g.money) : '', g.rod ? `낚싯대 「${g.rod}」` : '', g.furn ? `「${findFurniture(g.furn)?.name}」` : '', g.title ? `칭호 「${g.title}」` : '', g.luck ? `운 +${Math.round(g.luck * 100)}%` : ''].filter(Boolean).join(' · ');
         const row = document.createElement('div'); row.className = 'goalRow' + (claimed ? ' claimed' : done ? ' ready' : '');
         row.innerHTML = `<div class="gname">${esc(g.name)}</div><div class="gbar"><i style="width:${(cur / g.need) * 100}%"></i><span>${cur} / ${g.need}</span></div><div class="ggift">${gifts}</div>`;
         const b = document.createElement('button'); b.className = 'actBtn'; b.textContent = claimed ? '받았어요' : '받기'; b.disabled = claimed || !done;

@@ -25,7 +25,7 @@ export function buildRubyFishBody(o, add, eyeSide, L, H, W) {
     // 마름모 몸: 가운데가 제일 높고 앞뒤로 계단처럼 낮아져요
     for (let i = -3; i <= 3; i++) {
       const t = 1 - Math.abs(i) / 3.6, x = i * L * 0.09;
-      add(L * 0.09, H * t, W * (0.55 + t * 0.45), i % 2 ? C : B === C ? C : C, x, 0, 0);
+      add(L * 0.09, H * t, W * (0.55 + t * 0.45), C, x, 0, 0);
       add(L * 0.085, H * t * 0.18, W * (0.5 + t * 0.45) + 0.01, P, x, H * t * 0.42, 0);            // 깎인 윗면 (밝은 띠)
       add(L * 0.085, H * t * 0.16, W * (0.5 + t * 0.45) + 0.01, B, x, -H * t * 0.43, 0);           // 아랫면
     }

@@ -36,7 +36,7 @@ export function findCoplanar(THREE, scene, where = () => true, max = 200) {
       const ul = Math.hypot(ux, uy, uz); ux /= ul; uy /= ul; uz /= ul;
       const vx = n.y * uz - n.z * uy, vy = n.z * ux - n.x * uz, vz = n.x * uy - n.y * ux;
       const P = [a, b, c].map((p) => [p.x * ux + p.y * uy + p.z * uz, p.x * vx + p.y * vy + p.z * vz]);
-      const cc = col ? [col.getX(i0), col.getY(i0), col.getZ(i0)] : [m.color.r, m.color.g, m.color.b];
+      const cc = col ? [col.getX(i0), col.getY(i0), col.getZ(i0)] : m.color ? [m.color.r, m.color.g, m.color.b] : [1, 1, 1]; // 하늘 돔 같은 셰이더 재질은 색이 없어요
       let L = planes.get(key); if (!L) planes.set(key, (L = []));
       L.push({ P, c: cc, d, mat: m.id, tex: !!m.map, at: [+ctr.x.toFixed(2), +ctr.y.toFixed(3), +ctr.z.toFixed(2)], n: [+n.x.toFixed(2), +n.y.toFixed(2), +n.z.toFixed(2)] });
     }

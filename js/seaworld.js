@@ -5,6 +5,8 @@
 //  "같은 재질끼리 처음부터 한 덩어리"로 만들어요 (색은 꼭짓점에 칠해요).
 // =====================================================
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { fmtMoney } from './money.js';
+import { fixCoplanar } from './zfix.js';
 
 // 한 덩어리 장식 묶음. add() 로 모양을 쌓고, build() 로 메시 하나를 만들어요
 export class DecoBatch {
@@ -291,6 +293,7 @@ export function buildSeaWorld(ctx) {
   const HIP = new THREE.ConeGeometry(0.5, 1, 4); HIP.rotateY(Math.PI / 4); // 네모 뿔 지붕
   function makeHouse(o) {
     const { id, name, price, x, z, w, d, H, kind, tankW, style: defStyle } = o;
+    const floors = o.floors || 1, FH = H / floors; // 여러 층 집: 층 높이
     const T = 0.26, y0 = ISLAND_TOP - 0.02;
     const x0 = x - w / 2, x1 = x + w / 2, z0 = z - d / 2, z1 = z + d / 2;
     const inside = new DecoBatch(THREE);     // 색이 안 바뀌는 집 안 물건 (한 번만 만들어요)
@@ -303,11 +306,14 @@ export function buildSeaWorld(ctx) {
     houseBlockers.push(wallMesh);
     // 창문 자리: [x, z, 바깥 방향 nx, nz, 높이]
     const WINDOWS = [];
-    const upper = H >= 4.4; // 벽이 높으면 위쪽에 작은 창(2층처럼)
-    const winY = Math.min(1.9, H * 0.45);
-    for (let t = -w / 2 + 1.5; t <= w / 2 - 1.4; t += 2.8) if (Math.abs(t) > DOOR / 2 + 1.0) WINDOWS.push([x + t, z0 - 0.02, 0, -1, winY]);
-    for (let t = -d / 2 + 1.5; t <= d / 2 - 1.4; t += 2.6) { WINDOWS.push([x0 - 0.02, z + t, -1, 0, winY]); WINDOWS.push([x1 + 0.02, z + t, 1, 0, winY]); }
-    for (let t = -w / 2 + 1.5; t <= w / 2 - 1.4; t += 3) WINDOWS.push([x + t, z1 + 0.02, 0, 1, H - 1.2]);
+    const upper = floors === 1 && H >= 4.4; // 1층 집인데 벽이 높으면 위쪽에 작은 창
+    const winY = Math.min(1.9, FH * 0.45);
+    for (let f = 0; f < floors; f++) { // 층마다 창문 한 줄
+      const wy = f * FH + winY;
+      for (let t = -w / 2 + 1.5; t <= w / 2 - 1.4; t += 2.8) if (f > 0 || Math.abs(t) > DOOR / 2 + 1.0) WINDOWS.push([x + t, z0 - 0.02, 0, -1, wy]);
+      for (let t = -d / 2 + 1.5; t <= d / 2 - 1.4; t += 2.6) { WINDOWS.push([x0 - 0.02, z + t, -1, 0, wy]); WINDOWS.push([x1 + 0.02, z + t, 1, 0, wy]); }
+      for (let t = -w / 2 + 1.5; t <= w / 2 - 1.4; t += 3) WINDOWS.push([x + t, z1 + 0.02, 0, 1, floors > 1 ? wy : H - 1.2]);
+    }
     for (const [wx, wz, nx, nz, wy] of WINDOWS) {
       glow.add(BOX, 0xffffff, [wx, y0 + wy, wz], [0, 0, 0], nx ? [T + 0.06, 1.3, 1.4] : [1.4, 1.3, T + 0.06]);
       if (upper && wy < 2.5) glow.add(BOX, 0xffffff, [wx, y0 + H - 0.85, wz], [0, 0, 0], nx ? [T + 0.06, 0.6, 0.9] : [0.9, 0.6, T + 0.06]);
@@ -333,9 +339,121 @@ export function buildSeaWorld(ctx) {
     const rw = Math.round(w * 1.55 * 2) / 2, rd = Math.round(d * 1.45 * 2) / 2;   // 방 크기 (바깥의 약 2.2배 넓이)
     const rx = ROOM_X0 + ri * ROOM_GAP, rz = ROOM_Z;
     const rx0 = rx - rw / 2, rx1 = rx + rw / 2, rz0 = rz - rd / 2, rz1 = rz + rd / 2;
-    const RH = Math.max(3.4, H * 0.85);                                          // 방 벽 높이
+    const RH = Math.min(5.5, Math.max(3.4, H * 0.85));                           // 방 벽 높이 (여러 층 집도 방은 한 층)
     const RDOOR = 1.6;                                                           // 방 앞쪽 나가는 문 너비
 
+    // ----- 바깥 꾸미기 (박물관처럼 세밀하게): 판자 벽 · 층 띠 · 기초 돌 · 덧창 · 커튼 · 창턱 받침 · 문 디딤돌 ·
+    //        물받이 · 홈통 · 굴뚝 벽돌 · 기와 줄 · 발코니 · 이끼와 흙 · 벽 금 · (왕궁) 모서리 탑
+    const mulC = (c, k) => new THREE.Color(c).multiplyScalar(k).getHex();
+    const liteC = (c, k) => new THREE.Color(c).lerp(new THREE.Color(0xffffff), k).getHex();
+    function detailExterior(B, RB, S, rH) {
+      const { wall, trim, roof } = S;
+      const tones = [wall, mulC(wall, 0.92), liteC(wall, 0.1)];
+      const holes = WINDOWS.map(([wx, wz, nx, nz, wy]) => ({ nx, nz, at: nx ? wz : wx, y0: wy - 0.9, y1: wy + 0.95, half: 1.25 }));
+      if (upper) WINDOWS.forEach(([wx, wz, nx, nz, wy]) => { if (wy < 2.5) holes.push({ nx, nz, at: nx ? wz : wx, y0: H - 1.25, y1: H - 0.4, half: 0.6 }); });
+      holes.push({ nx: 0, nz: -1, at: x, y0: -1, y1: DH + 0.35, half: DOOR / 2 + 0.3 });
+      const hole = (nx, nz, c, y, half) => holes.some((h) => h.nx === nx && h.nz === nz && Math.abs(h.at - c) < h.half + half && y > h.y0 && y < h.y1);
+      const faces = [[0, -1, w, z0], [0, 1, w, z1], [-1, 0, d, x0], [1, 0, d, x1]];
+      // 1) 판자 벽: 가로 판자 (줄마다 이음매 어긋나게, 3톤) — 통나무집은 통나무라 빼요
+      if (kind !== 'cabin') for (const [nx, nz, L, pl] of faces) {
+        const o = T / 2 + 0.012;
+        let row = 0;
+        for (let yy = 0.5; yy < H - 0.3; yy += 0.34, row++) {
+          let t = -L / 2 + 0.2 + (row % 2) * 0.6;
+          while (t < L / 2 - 0.25) {
+            const len = Math.min(1.1 + rnd() * 1.3, L / 2 - 0.2 - t), c = t + len / 2;
+            t += len + 0.02;
+            if (len < 0.2) continue;
+            const cc = (nx ? z : x) + c;
+            if (hole(nx, nz, cc, yy, len / 2)) continue;
+            if (nx) B.add(BOX, pick(tones), [pl + nx * o, y0 + yy, cc], [0, 0, 0], [0.024, 0.29, len]);
+            else B.add(BOX, pick(tones), [cc, y0 + yy, pl + nz * o], [0, 0, 0], [len, 0.29, 0.024]);
+          }
+        }
+      }
+      // 2) 층 띠 (여러 층 집) + 3) 기초 돌 (크기 다른 돌 2줄, 4톤)
+      for (let f = 1; f < floors; f++) for (const [nx, nz, L, pl] of faces) {
+        if (nx) B.add(BOX, trim, [pl + nx * 0.06, y0 + f * FH, z], [0, 0, 0], [0.14, 0.24, L + 0.3]);
+        else B.add(BOX, trim, [x, y0 + f * FH, pl + nz * 0.06], [0, 0, 0], [L + 0.3, 0.24, 0.14]);
+      }
+      const stones = [0x8a8478, 0x7a7468, 0x9a9488, 0x6e685e];
+      for (const [nx, nz, L0, pl0] of faces) {
+        const L = L0 + 0.6, pl = pl0 + (nx || nz) * 0.3 + (nx || nz) * 0.012;
+        for (let r = 0; r < 2; r++) { let t = -L / 2 + r * 0.25; while (t < L / 2 - 0.05) { const len = Math.min(0.45 + rnd() * 0.5, L / 2 - t), c = t + len / 2; t += len; if (nx) B.add(BOX, pick(stones), [pl, y0 - 0.25 + r * 0.19, z + c], [0, 0, 0], [0.03, 0.17, len - 0.03]); else B.add(BOX, pick(stones), [x + c, y0 - 0.25 + r * 0.19, pl], [0, 0, 0], [len - 0.03, 0.17, 0.03]); } }
+        for (let k = 0; k < Math.round(L / 1.5); k++) { const c = -L / 2 + rnd() * L, ww = 0.4 + rnd() * 0.7; const col = pick([0x5a7a3a, 0x6a8a44, 0x7a6a4a]); if (nx) B.add(BOX, col, [pl + nx * 0.008, y0 - 0.1 + rnd() * 0.08, z + c], [0, 0, 0], [0.012, 0.1 + rnd() * 0.12, ww]); else B.add(BOX, col, [x + c, y0 - 0.1 + rnd() * 0.08, pl + nz * 0.008], [0, 0, 0], [ww, 0.1 + rnd() * 0.12, 0.012]); } // 이끼 · 흙
+      }
+      // 4) 창: 덧창(판자 + 가로살 + 경첩) · 커튼 · 창턱 받침 · 머리 장식
+      const shut = S.door, shutD = mulC(S.door, 0.75), cur = S.rug ?? 0xd8a0a0;
+      for (const [wx, wz, nx, nz, wy] of WINDOWS) {
+        const P = (c, y, n, sa, sy, sn, col, b = B) => { if (nx) b.add(BOX, col, [wx + nx * n, y0 + y, wz + c], [0, 0, 0], [sn, sy, sa]); else b.add(BOX, col, [wx + c, y0 + y, wz + nz * n], [0, 0, 0], [sa, sy, sn]); };
+        for (const s of [-1, 1]) {
+          const c = s * 1.05;
+          P(c, wy, 0.2, 0.42, 1.36, 0.04, shut);
+          for (let k = 0; k < 4; k++) P(c, wy - 0.45 + k * 0.3, 0.225, 0.36, 0.05, 0.02, shutD);
+          for (const hy of [-0.45, 0.45]) P(s * 0.86, wy + hy, 0.23, 0.08, 0.05, 0.02, 0x2a2a2a);
+          P(s * 0.5, wy - 0.03, T / 2 + 0.04, 0.3, 1.14, 0.014, cur); // 커튼 (창 안쪽 양옆)
+        }
+        P(0, wy + 0.52, T / 2 + 0.045, 1.0, 0.1, 0.016, mulC(cur, 0.8));
+        P(0, wy + 0.86, 0.14, 1.9, 0.12, 0.08, trim);               // 머리 장식
+        for (const s of [-1, 1]) P(s * 0.6, wy - 0.86, 0.16, 0.1, 0.14, 0.12, mulC(trim, 0.85)); // 창턱 받침
+      }
+      // 5) 문: 디딤돌 2 · 문패 · 문 위 받침 2 · 문 옆 큰 화분 2
+      for (let k = 0; k < 2; k++) B.add(BOX, pick(stones), [x, y0 - 0.12 - k * 0.12, z0 - 0.45 - k * 0.45], [0, 0, 0], [DOOR + 0.6 - k * 0.3, 0.12, 0.42]);
+      B.add(BOX, 0xd8b040, [x, y0 + DH + 0.42, z0 - T / 2 - 0.06], [0, 0, 0], [0.6, 0.2, 0.03]);
+      for (const s of [-1, 1]) {
+        B.add(BOX, mulC(trim, 0.85), [x + s * (DOOR / 2 + 0.25), y0 + DH + 0.05, z0 - T / 2 - 0.15], [0, 0, 0], [0.12, 0.3, 0.3]);
+        const px = x + s * (DOOR / 2 + 0.75), pz = z0 - 0.7;
+        B.add(CYL, 0xb86a3a, [px, y0 + 0.25, pz], [0, 0, 0], [0.5, 0.5, 0.5]);
+        B.add(CYL, 0xa85a2a, [px, y0 + 0.52, pz], [0, 0, 0], [0.58, 0.06, 0.58]);
+        for (let k = 0; k < 5; k++) B.add(BALL, pick([0x4a8a3a, 0x5a9a44, 0x3a7a2e]), [px + (rnd() - 0.5) * 0.3, y0 + 0.75 + rnd() * 0.2, pz + (rnd() - 0.5) * 0.3], [0, 0, 0], [0.26, 0.26, 0.26]);
+      }
+      // 6) 물받이 (처마 앞뒤) + 모서리 홈통 4 + 고정쇠
+      for (const s of [-1, 1]) B.add(BOX, mulC(trim, 0.9), [x, y0 + H + 0.06, z + s * (d / 2 + 0.25)], [0, 0, 0], [w + 0.9, 0.12, 0.14]);
+      for (const [cx, cz] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) {
+        const ox = cx + Math.sign(cx - x) * 0.32, oz = cz + Math.sign(cz - z) * 0.32;
+        B.add(BOX, mulC(trim, 0.8), [ox, y0 + H / 2, oz], [0, 0, 0], [0.12, H, 0.12]);
+        for (let k = 1; k < Math.max(3, floors * 2 + 1); k++) B.add(BOX, 0x4a4a4a, [ox, y0 + k * H / Math.max(3, floors * 2 + 1), oz], [0, 0, 0], [0.18, 0.05, 0.18]);
+      }
+      // 7) 벽 금 몇 줄
+      for (let k = 0; k < 3; k++) { const [nx, nz, L, pl] = faces[k % 4], c = (rnd() - 0.5) * L * 0.7, yy = 0.6 + rnd() * (H - 1.2); if (hole(nx, nz, (nx ? z : x) + c, yy, 0.3)) continue; if (nx) B.add(BOX, 0x5a5048, [pl + nx * (T / 2 + 0.04), y0 + yy, z + c], [0, 0, 0.5], [0.01, 0.5, 0.02]); else B.add(BOX, 0x5a5048, [x + c, y0 + yy, pl + nz * (T / 2 + 0.04)], [0, 0, 0.5], [0.02, 0.5, 0.01]); }
+      // 8) 굴뚝 벽돌 (세모 · 뿔 지붕 집)
+      if (kind !== 'beach') {
+        const cx = x1 - 1.2, cz = z + d * 0.18, ch = rH * 0.7, cy = y0 + H + rH * 0.6;
+        for (let r = 0; r < Math.floor(ch / 0.22); r++) for (const [nx, nz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) for (let c = 0; c < 2; c++) {
+          const off = -0.17 + c * 0.34 + (r % 2) * 0.1 - 0.05;
+          if (nx) RB.add(BOX, pick([0x8a3a2a, 0x7a3024, 0x9a4a34]), [cx + nx * 0.362, cy - ch / 2 + 0.11 + r * 0.22, cz + off], [0, 0, 0], [0.02, 0.18, 0.3]);
+          else RB.add(BOX, pick([0x8a3a2a, 0x7a3024, 0x9a4a34]), [cx + off, cy - ch / 2 + 0.11 + r * 0.22, cz + nz * 0.362], [0, 0, 0], [0.3, 0.18, 0.02]);
+        }
+      }
+      // 9) 기와 줄: 세모 지붕 양쪽 비탈에 줄줄이 (2톤, 줄마다 살짝 높이를 달리)
+      if (kind !== 'beach' && kind !== 'tower') {
+        const Dz = d * 0.86 + 0.4, apexY = y0 + H + rH * 0.883, eaveY = y0 + H + rH * 0.133, hw = 0.433 * Dz;
+        const a = Math.atan2(apexY - eaveY, hw), L = Math.hypot(apexY - eaveY, hw), n = Math.max(4, Math.round(L / 0.36));
+        for (const s of [-1, 1]) for (let k = 0; k < n; k++) {
+          const t = (k + 0.5) / n, zz = z + s * hw * (1 - t), yy = eaveY + (apexY - eaveY) * t;
+          const nrm = 0.035 + (k % 2) * 0.012;
+          RB.add(BOX, k % 2 ? roof : mulC(roof, 0.85), [x, yy + Math.cos(a) * nrm, zz + s * Math.sin(a) * nrm], [s * a, 0, 0], [w + 1.04, 0.04, L / n + 0.03]);
+        }
+        RB.add(BOX, mulC(roof, 0.7), [x, apexY + 0.06, z], [0, 0, 0], [w + 1.1, 0.14, 0.3]); // 용마루
+      }
+      // 10) 발코니 (2층부터, 앞쪽): 바닥판 + 난간 기둥 + 손잡이 + 받침 까치발
+      for (let f = 1; f < floors; f++) {
+        const by = y0 + f * FH, bw = Math.min(w - 2, 6);
+        B.add(BOX, mulC(trim, 0.95), [x, by + 0.05, z0 - 0.8], [0, 0, 0], [bw, 0.12, 1.4]);
+        for (let k = 0; k <= Math.round(bw / 0.3); k++) B.add(BOX, trim, [x - bw / 2 + k * (bw / Math.round(bw / 0.3)), by + 0.5, z0 - 1.45], [0, 0, 0], [0.05, 0.8, 0.05]);
+        B.add(BOX, trim, [x, by + 0.92, z0 - 1.45], [0, 0, 0], [bw + 0.1, 0.07, 0.1]);
+        for (const s of [-1, 1]) { B.add(BOX, trim, [x + s * bw / 2, by + 0.5, z0 - 0.8], [0, 0, 0], [0.05, 0.8, 1.3]); B.add(BOX, mulC(trim, 0.8), [x + s * (bw / 2 - 0.3), by - 0.3, z0 - 0.5], [0.6, 0, 0], [0.1, 0.7, 0.1]); }
+      }
+      // 11) 왕궁: 뒤 모서리 둥근 탑 2개 (돌 띠 · 창 · 뾰족 지붕 · 깃발)
+      if (o.turrets) for (const s of [-1, 1]) {
+        const tx = s < 0 ? x0 : x1, tz = z1, tr = 1.6, th = H + 3;
+        B.add(new THREE.CylinderGeometry(1, 1, 1, 16), wall, [tx, y0 + th / 2, tz], [0, 0, 0], [tr, th, tr]);
+        for (let f = 0; f <= floors; f++) B.add(new THREE.CylinderGeometry(1, 1, 1, 16), trim, [tx, y0 + f * FH + 0.1, tz], [0, 0, 0], [tr + 0.1, 0.18, tr + 0.1]);
+        RB.add(new THREE.ConeGeometry(1, 1, 16), roof, [tx, y0 + th + 1.6, tz], [0, 0, 0], [tr + 0.35, 3.2, tr + 0.35]);
+        RB.add(BOX, 0xd8b040, [tx, y0 + th + 3.5, tz], [0, 0, 0], [0.06, 0.8, 0.06]);
+        RB.add(BOX, 0xd83a3a, [tx + 0.25, y0 + th + 3.7, tz], [0, 0, 0], [0.45, 0.3, 0.03]);
+      }
+    }
     // ----- 디자인 색으로 짓기 -----
     const clear = (g) => { while (g.children.length) { const m = g.children[0]; g.remove(m); m.geometry.dispose(); if (m.material) m.material.dispose(); } };
     function paint(S) {
@@ -466,9 +584,13 @@ export function buildSeaWorld(ctx) {
       // 문 앞 매트 (밟으면 밖으로 나가요)
       soft.add(BOX, S.door, [rx, y0 + 0.11, rz0 + 0.55], [0, 0, 0], [RDOOR, 0.03, 0.8]);
       soft.add(BOX, S.rug2, [rx, y0 + 0.125, rz0 + 0.55], [0, 0, 0], [RDOOR - 0.3, 0.02, 0.55]);
+      detailExterior(walls, roofB, S, rH); // 박물관처럼 세밀한 바깥 꾸미기
       walls.build(wallMesh);
       roofB.build(roofGroup);
       soft.build(styledIn);
+      // 디자인을 바꿀 수 있는 덩어리는 게임 전체 겹침 보정에서 빠져요 → 칠할 때마다 이 집만 따로 (겹친 게 없을 때까지, 최대 8번)
+      const one = { updateMatrixWorld() { wallMesh.updateMatrixWorld(true); roofGroup.updateMatrixWorld(true); styledIn.updateMatrixWorld(true); }, traverse(fn) { wallMesh.traverse(fn); roofGroup.traverse(fn); styledIn.traverse(fn); } };
+      try { for (let k = 0; k < 8; k++) if (!fixCoplanar(THREE, one, { all: true, quiet: true })) break; } catch (e) { console.warn('[집 겹침 고치기]', e); }
       door.material.color.set(S.door);
     }
 
@@ -580,7 +702,7 @@ export function buildSeaWorld(ctx) {
     h.setStyle(defStyle);
     houses.push(h);
     // 문 앞 (사기 / 들어가기 / 디자인) · 어항 앞 (물고기 넣고 빼기)
-    shops.push({ kind: 'house', house: h, title: `${name} · ${'$' + price.toLocaleString('en-US')}`, group: wallMesh, pos: new THREE.Vector3(x, y0, z0 - 1.6), promptAt: new THREE.Vector3(x, y0 + 3.6, z0 - 1.2) });
+    shops.push({ kind: 'house', house: h, title: `${name} · ${fmtMoney(price)}`, group: wallMesh, pos: new THREE.Vector3(x, y0, z0 - 1.6), promptAt: new THREE.Vector3(x, y0 + 3.6, z0 - 1.2) });
     // 방 안 문 옆: 집 관리 (가구 배치 · 디자인)
     shops.push({ kind: 'house', house: h, roomEntry: true, title: '집 관리 · 가구 배치 · 디자인 (E)', group: wallMesh, pos: new THREE.Vector3(rx + RDOOR / 2 + 1.0, y0, rz0 + 1.0), promptAt: new THREE.Vector3(rx + RDOOR / 2 + 1.0, y0 + 2.2, rz0 + 0.8), r: 1.1 });
     shops.push({ kind: 'tank', house: h, title: '어항 · 물고기 전시하기', group: wallMesh, pos: new THREE.Vector3(tx, y0, tz - td / 2 - 1.0), promptAt: new THREE.Vector3(tx, ty + th + 0.6, tz - td / 2) });
@@ -690,12 +812,16 @@ export function buildSeaWorld(ctx) {
     ['coral', '산호섬 해변집', '산호섬', 200000, -75, 75, 15, 11, 8.5, 4.0, 'beach', 4.8, 4],
     ['pine', '솔숲섬 통나무집', '솔숲섬', 260000, -80, 115, 15, 10, 9, 3.6, 'cabin', 4.8, 3],
     ['star', '별빛섬 탑 저택', '별빛섬', 380000, -20, 150, 16, 12, 10, 4.6, 'tower', 6.0, 7],
-    ['whale', '고래섬 대저택', '고래섬', 600000, 24, 140, 21, 16, 12, 5.2, 'grand', 8.0, 1]
+    ['whale', '고래섬 대저택', '고래섬', 600000, 24, 140, 21, 16, 12, 5.2, 'grand', 8.0, 1],
+    // 여러 층 집 (마지막 칸: floors 층수 · turrets 모서리 탑) — 2층은 큰 바다, 3 · 4층은 루비 바다
+    ['hill2', '노을 언덕 2층 저택', '노을 언덕섬', 1500000000, -45, 125, 15, 12, 10, 6.8, 'grand', 7.0, 0, { floors: 2 }],
+    ['crimson3', '진홍 바다 3층 성', '진홍섬', 3000000000, -115, 300, 18, 14, 12, 10.2, 'grand', 9.0, 7, { floors: 3 }],
+    ['palace4', '루비 왕궁 4층 대저택', '왕궁섬', 6000000000, 115, 300, 22, 18, 14, 13.6, 'grand', 11.0, 1, { floors: 4, turrets: true }]
   ];
   const islandInfo = [];
-  for (const [id, name, iname, price, ix, iz, r, hw, hd, hh, kind, tankW, style] of ISLANDS) {
+  for (const [id, name, iname, price, ix, iz, r, hw, hd, hh, kind, tankW, style, more] of ISLANDS) {
     makeSeaIsland(ix, iz, r);
-    makeHouse({ id, name, price, x: ix, z: iz - (r > 18 ? 2 : 0), w: hw, d: hd, H: hh, kind, tankW, style });
+    makeHouse({ id, name, price, x: ix, z: iz - (r > 18 ? 2 : 0), w: hw, d: hd, H: hh, kind, tankW, style, ...(more || {}) });
     islandInfo.push({ id, name: iname, x: ix, z: iz, r });
   }
   // 섬 꾸미기: 야자수·꽃·바위·벤치·가로등·작은 선착장

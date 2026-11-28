@@ -542,16 +542,23 @@ export function setupPets(ctx) {
   const houseOf = (id) => seaWorld.houses.find((h) => h.id === id);
   const homeSpot = (h) => new THREE.Vector3(h.x0 + 0.8 + Math.random() * (h.x1 - h.x0 - 1.6), 0.32, h.z0 + 0.8 + Math.random() * (h.z1 - h.z0 - 1.6));
   // 세이브대로 동물들 다시 놓기: 데리고 다니는 1마리 + 집에서 노는 아이들 (최대 6)
+  //  데리고 다니는 친구는 P.team (최대 5마리, P.on = 맨 앞 친구) · 나머지는 집에서 놀아요
+  const MAX_TEAM = 5;
+  function fixTeam() { P.team = (P.team || []).filter((id, i, a) => P.own.includes(id) && a.indexOf(id) === i).slice(0, MAX_TEAM); P.on = P.team[0] || null; }
   function syncPets() {
     for (const p of live.slice()) if (!p.shop) despawn(p);
-    if (P.on && P.own.includes(P.on)) {
-      const p = spawn(P.on, 'follow');
-      const pp = ctx.person.position;
-      p.pos.set(pp.x - 1.2, pp.y, pp.z - 1.2); p.y = pp.y;
-    }
+    fixTeam();
+    const pp = ctx.person.position;
+    P.team.forEach((id, i) => {
+      const p = spawn(id, 'follow');
+      p.slot = i;
+      p.pos.set(pp.x - 1.2 - i * 0.6, pp.y, pp.z - 1.2 + (i % 2) * 0.8); p.y = pp.y;
+    });
     const h = save.homes[0] && houseOf(save.homes[0]);
-    if (h) for (const id of P.own.filter((x) => x !== P.on).slice(0, 6)) { const p = spawn(id, 'home', h); p.pos.copy(homeSpot(h)); p.y = 0.32; p.ry = Math.random() * 6.28; }
+    if (h) for (const id of P.own.filter((x) => !P.team.includes(x)).slice(0, 6)) { const p = spawn(id, 'home', h); p.pos.copy(homeSpot(h)); p.y = 0.32; p.ry = Math.random() * 6.28; }
   }
+  // 멀티플레이용: 따라다니는 친구들 [동물 번호, x, y, z, 방향, 움직이는지]
+  function followers() { return live.filter((p) => p.mode === 'follow').map((p) => [PETS.indexOf(p.def), Math.round(p.pos.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(p.pos.z * 100) / 100, Math.round(p.ry * 100) / 100, p.speed > 0.3 ? 1 : 0]); }
 
   // ---------- 친밀도 (0~100): 시간이 지나면 아주 조금씩 줄어요 ----------
   const love = (id) => P.love[id] ?? 20;
@@ -564,7 +571,7 @@ export function setupPets(ctx) {
   }
   const nameOf = (id) => P.nm[id] || findPet(id).name;
   const loveLabel = (n) => (n >= 90 ? '단짝' : n >= 60 ? '아주 친해요' : n >= 30 ? '친해요' : '서먹해요');
-  function luckBonus() { if (!P.on) return 0; const n = love(P.on); return n >= 90 ? 0.06 : n >= 60 ? 0.04 : n >= 30 ? 0.02 : 0; }
+  function luckBonus() { if (!P.on) return 0; const n = Math.max(...(P.team && P.team.length ? P.team : [P.on]).map(love)); return n >= 90 ? 0.06 : n >= 60 ? 0.04 : n >= 30 ? 0.02 : 0; } // 데리고 다니는 친구 중 제일 친한 아이 기준
 
   // ---------- 쓰다듬기 ----------
   const petCool = {};
@@ -653,18 +660,25 @@ export function setupPets(ctx) {
   function renderPets() {
     decayLove();
     const body = petPanel.querySelector('.pbody');
-    body.innerHTML = `<div class="count">가진 돈 ${money(save.money)} · 데리고 다니는 친구는 1마리, 나머지는 내 집에서 놀아요. 다가가서 <b>E</b> 로 쓰다듬고, 물고기나 간식을 주면 더 친해져요. 친해질수록 낚시 운이 조금 올라가요 (최대 +6%).</div>`;
+    body.innerHTML = `<div class="count">가진 돈 ${money(save.money)} · 데리고 다니는 친구는 <b>5마리까지</b>, 나머지는 내 집에서 놀아요. 다가가서 <b>E</b> 로 쓰다듬고, 물고기나 간식을 주면 더 친해져요. 친해질수록 낚시 운이 조금 올라가요 (최대 +6%).</div>`;
     if (P.own.length) {
       body.insertAdjacentHTML('beforeend', '<div class="secTitle">내 친구들</div>');
       const grid = document.createElement('div'); grid.className = 'furnGrid';
       for (const id of P.own) {
         const def = findPet(id), n = love(id);
-        const card = document.createElement('div'); card.className = 'furnCard petCard' + (P.on === id ? ' on' : '');
+        const inTeam = (P.team || []).includes(id);
+        const card = document.createElement('div'); card.className = 'furnCard petCard' + (inTeam ? ' on' : '');
         card.innerHTML = `<canvas width="150" height="110"></canvas><div class="fnm">${esc(nameOf(id))}</div><div class="fown">${esc(def.name)} · ${loveLabel(n)}</div><div class="loveBar"><i style="width:${n}%"></i></div>`;
         const mk = (t, fn, dis) => { const b = document.createElement('button'); b.className = 'actBtn'; b.textContent = t; b.disabled = !!dis; b.onclick = () => { fn(); renderPets(); }; return b; };
         const row = document.createElement('div'); row.className = 'petBtns';
         row.append(
-          mk(P.on === id ? '집에 두기' : '데리고 다니기', () => { P.on = P.on === id ? null : id; writeSave(); syncPets(); }),
+          mk(inTeam ? '집에 두기' : '데리고 다니기', () => {
+            P.team = P.team || [];
+            if (inTeam) P.team = P.team.filter((x) => x !== id);
+            else if (P.team.length >= MAX_TEAM) { notice('데리고 다닐 수 있는 친구는 5마리까지예요. 한 마리를 집에 두고 와요.'); return; }
+            else P.team.push(id);
+            writeSave(); syncPets();
+          }),
           mk('물고기 주기', () => feedFish(id), !save.inv.length),
           mk('간식 주기', () => feedSnack(id), !SNACKS.some((k) => save.mats[k])),
           mk('이름 짓기', () => { const v = prompt('새 이름 (10글자까지)', nameOf(id)); if (v != null) { const s = v.replace(/[<>]/g, '').trim().slice(0, 10); if (s) P.nm[id] = s; else delete P.nm[id]; writeSave(); } })
@@ -685,7 +699,7 @@ export function setupPets(ctx) {
       b.onclick = () => {
         if (!atShop || save.money < def.price) return;
         save.money -= def.price; P.own.push(def.id); P.love[def.id] = 20;
-        if (!P.on) P.on = def.id;
+        P.team = P.team || []; if (P.team.length < MAX_TEAM) P.team.push(def.id); fixTeam();
         writeSave(); sfx.coin(); updateUI(); syncPets();
         notice(`${def.name}가 가족이 됐어요! 다가가서 E 로 쓰다듬어 줘요.`);
         renderPets();
@@ -798,19 +812,22 @@ export function setupPets(ctx) {
       p.act = list[Math.floor(Math.random() * list.length)]; p.actT = 0;
     }
   }
+  // 친구마다 주인 뒤쪽의 다른 자리로 따라와요 (주인 기준 [옆, 뒤])
+  const SLOTS = [[0, 0], [-1.3, 0.5], [1.3, 0.5], [-0.75, 1.6], [0.75, 1.6]];
   function stepFollow(p, dt, t) {
-    const per = ctx.person.position;
+    const per0 = ctx.person.position, sl = SLOTS[p.slot || 0] || SLOTS[0], pry = ctx.player.ry ?? 0;
+    const per = { x: per0.x + Math.cos(pry) * sl[0] + Math.sin(pry) * sl[1], y: per0.y, z: per0.z - Math.sin(pry) * sl[0] + Math.cos(pry) * sl[1] };
     const dx = per.x - p.pos.x, dz = per.z - p.pos.z, d = Math.hypot(dx, dz);
     p.sleeping = false; p.swimK += ((game.swimming && p.def.swim ? 1 : 0) - p.swimK) * Math.min(1, dt * 3);
     if (game.inBoat) {
       // 보트에 같이 타요 (주인 옆자리)
       const ry = ctx.player.ry ?? ctx.person.rotation.y;
-      tmp.set(0.45, 0, -0.25).applyAxisAngle(new THREE.Vector3(0, 1, 0), ry);
+      tmp.set(0.45 - (p.slot || 0) * 0.22, 0, -0.25 + ((p.slot || 0) % 2) * 0.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), ry); // 친구마다 보트 자리를 조금씩 다르게
       p.pos.set(per.x + tmp.x, per.y, per.z + tmp.z); p.y = per.y + 0.05;
       p.ry = ry; p.speed = 0; p.pose = 'sit';
     } else {
       p.pose = null;
-      if (d > 28) { p.pos.set(per.x - Math.sin(ctx.player.ry || 0) * 1.5, per.y, per.z - Math.cos(ctx.player.ry || 0) * 1.5); p.y = per.y; }
+      if (d > 28) { p.pos.set(per.x, per.y, per.z); p.y = per.y; }
       const waitShore = game.swimming && !p.def.swim && p.def.gait !== 'fly';
       const far = d > (ctx.player.moving ? 2.0 : 2.8);
       if (far && !waitShore) {
@@ -855,7 +872,7 @@ export function setupPets(ctx) {
       if (s.kind === 'pet') { pat(s.pet); return true; }
       return false;
     },
-    luckBonus, live,
+    luckBonus, live, followers,
     sync: syncPets,
     update(dt, t, now) {
       updateFx(dt);

@@ -193,7 +193,9 @@ function cleanState(s) {
   return {
     x: num(s.x, -600, 600), y: num(s.y, -5, 30), z: num(s.z, -1200, 600), r: num(s.r, -100, 100),
     a: ANIMS.has(s.a) ? s.a : 'idle', rod: Math.floor(num(s.rod, -1, 30)),
-    f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 24) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob, bt: s.bt == null ? -1 : Math.floor(num(s.bt, -1, 15))
+    f: s.f ? clean(s.f, 20) : null, m: s.m ? clean(s.m, 24) : null, n: Math.floor(num(s.n, 0, 1e9)), b: bob, bt: s.bt == null ? -1 : Math.floor(num(s.bt, -1, 15)),
+    // 데리고 다니는 반려동물 최대 5마리: [동물 번호, x, y, z, 방향, 움직이는지]
+    pt: Array.isArray(s.pt) ? s.pt.slice(0, 5).filter((q) => Array.isArray(q) && q.length >= 5).map((q) => [Math.floor(num(q[0], 0, 63)), num(q[1], -600, 600), num(q[2], -5, 30), num(q[3], -1200, 600), num(q[4], -100, 100), q[5] ? 1 : 0]) : []
   };
 }
 // 옷차림: 정해진 칸에 숫자만 받아요

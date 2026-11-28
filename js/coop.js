@@ -20,28 +20,37 @@ export function setupCoop(ctx) {
   // ---------- 공통: 반짝이 입자 ----------
   const sparks = [];
   const sparkGeo = new THREE.OctahedronGeometry(0.17, 0);
-  function burst(pos, color, n, speed, life, gravity = 3) {
+  const sparkMats = new Map(); // 색 + 밤낮 → 재질 하나 (같이 써요)
+  const sparkMat = (color) => { const k = color + (isNight() ? 'n' : 'd'); if (!sparkMats.has(k)) sparkMats.set(k, new THREE.MeshBasicMaterial({ color, transparent: true, blending: isNight() ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite: false, fog: false })); return sparkMats.get(k); };
+  const MAX_SPARKS = 1400;
+  // opt: drag 공기 저항 · size 크기 · trail 지나간 자리에 작은 불티 · twinkle 깜빡깜빡 · split 몇 초 뒤 다시 터짐 [색, 개수]
+  function spark(pos, color, v, life, gravity, opt = {}) {
+    if (sparks.length >= MAX_SPARKS) return;
+    const m = new THREE.Mesh(sparkGeo, sparkMat(color));
+    m.position.copy(pos); m.userData.dynamic = true; m.scale.setScalar(opt.size || 1);
+    scene.add(m);
+    sparks.push({ m, v, life: 0, max: life, g: gravity, drag: opt.drag ?? 1.2, size: opt.size || 1, trail: opt.trail || 0, tAcc: 0, twinkle: !!opt.twinkle, split: opt.split || null, color });
+  }
+  function burst(pos, color, n, speed, life, gravity = 3, opt = {}) {
     for (let i = 0; i < n; i++) {
-      // 밤엔 빛나게(가산), 낮엔 밝은 하늘에서 색이 하얗게 날아가지 않도록 보통 섞기
-      const m = new THREE.Mesh(sparkGeo, new THREE.MeshBasicMaterial({ color, transparent: true, blending: isNight() ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite: false }));
-      m.position.copy(pos);
       const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
       const v = new THREE.Vector3(Math.sin(ph) * Math.cos(th), Math.cos(ph), Math.sin(ph) * Math.sin(th)).multiplyScalar(speed * (0.75 + Math.random() * 0.3));
-      m.userData.dynamic = true;
-      scene.add(m);
-      sparks.push({ m, v, life: 0, max: life * (0.8 + Math.random() * 0.4), g: gravity });
+      spark(pos, color, v, life * (0.8 + Math.random() * 0.4), gravity, opt);
     }
   }
   function updateSparks(dt) {
     for (let i = sparks.length - 1; i >= 0; i--) {
       const s = sparks[i];
       s.life += dt;
-      s.v.y -= s.g * dt; s.v.multiplyScalar(1 - dt * 1.2);
+      s.v.y -= s.g * dt; s.v.multiplyScalar(1 - dt * s.drag);
       s.m.position.addScaledVector(s.v, dt);
       const k = s.life / s.max;
-      s.m.material.opacity = k > 0.6 ? (1 - k) / 0.4 : 1;
-      s.m.scale.setScalar(1 - k * 0.6);
-      if (k >= 1) { scene.remove(s.m); s.m.material.dispose(); sparks.splice(i, 1); }
+      let sc = s.size * (k > 0.6 ? Math.max(0.05, (1 - k) / 0.4) : 1) * (1 - k * 0.4);
+      if (s.twinkle) sc *= Math.random() < 0.35 ? 0.15 : 1.1;
+      s.m.scale.setScalar(sc);
+      if (s.trail) { s.tAcc += dt; if (s.tAcc > s.trail) { s.tAcc = 0; spark(s.m.position, s.color, new THREE.Vector3(0, -0.2, 0), 0.5, 0.6, { size: s.size * 0.45, drag: 3 }); } }
+      if (s.split && s.life > s.split[2]) { const [c, n] = s.split; s.split = null; burst(s.m.position, c, n, 2.2, 0.8, 1.5, { size: 0.6 }); }
+      if (k >= 1) { scene.remove(s.m); sparks.splice(i, 1); }
     }
   }
 
@@ -84,31 +93,64 @@ export function setupCoop(ctx) {
   // ---------- 불꽃놀이 ----------
   const FW_COLORS = [0xff5a7a, 0xffd84a, 0x5ad8ff, 0x8aff6a, 0xd88aff, 0xff9a3a, 0xffffff, 0x5affd8];
   const rockets = [];
-  function launch(x, z, c, mine, h = 7) {
+  // ---------- 터지는 모양 7가지 ----------
+  //  peony 공 · ring 고리 · willow 버드나무(금빛 꼬리가 길게 늘어져요) · crossette 십자(조각이 또 터져요)
+  //  heart 하트 · glitter 반짝이(타닥타닥 깜빡) · chrysanthemum 국화(꼬리 달린 큰 공 + 가운데 다른 색)
+  const SHAPES = ['peony', 'ring', 'willow', 'crossette', 'heart', 'glitter', 'chrysanthemum'];
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  flash.userData.dynamic = true; scene.add(flash);
+  let flashT = 0;
+  function explode(p, c1, c2, shape) {
+    const v3 = (x, y, z) => new THREE.Vector3(x, y, z);
+    if (shape === 'ring') {
+      const tilt = Math.random() * 1.2 - 0.6, yaw = Math.random() * Math.PI;
+      for (let i = 0; i < 90; i++) { const a = (i / 90) * Math.PI * 2; const v = v3(Math.cos(a) * 7, Math.sin(a) * 7 * Math.sin(tilt), Math.sin(a) * 7 * Math.cos(tilt)).applyAxisAngle(v3(0, 1, 0), yaw); spark(p, i % 2 ? c1 : c2, v, 1.8, 1.2, { drag: 1.1, size: 1.2 }); }
+      burst(p, 0xffffff, 20, 2, 0.8, 0.6);
+    } else if (shape === 'willow') {
+      burst(p, 0xffc84a, 110, 6, 3.4, 1.1, { drag: 1.8, trail: 0.07, size: 0.9 });
+      burst(p, c1, 25, 3, 1.2, 1.2);
+    } else if (shape === 'crossette') {
+      for (let i = 0; i < 16; i++) { const th = (i / 16) * Math.PI * 2, ph = (i % 2 ? 0.6 : 1.5); const v = v3(Math.sin(ph) * Math.cos(th), Math.cos(ph), Math.sin(ph) * Math.sin(th)).multiplyScalar(6.5); spark(p, c1, v, 1.6, 1.6, { size: 1.5, trail: 0.05, split: [c2, 14, 0.75] }); }
+    } else if (shape === 'heart') {
+      for (let i = 0; i < 100; i++) { const a = (i / 100) * Math.PI * 2, hx = 16 * Math.sin(a) ** 3, hy = 13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a); const v = v3(hx * 0.42, hy * 0.42, 0).applyAxisAngle(v3(0, 1, 0), ctx.cam ? ctx.cam.yaw : 0); spark(p, i % 3 ? 0xff5a8a : 0xffb0c8, v, 2.0, 0.6, { drag: 1.6, size: 1.2 }); }
+    } else if (shape === 'glitter') {
+      burst(p, c1, 60, 6, 1.8, 1.6, { size: 1.1 });
+      burst(p, 0xffffff, 120, 4.5, 2.4, 1.0, { twinkle: true, drag: 1.6, size: 0.7 });
+    } else if (shape === 'chrysanthemum') {
+      burst(p, c1, 120, 7.5, 2.0, 1.6, { trail: 0.06, size: 1.1 });
+      burst(p, c2, 50, 3.2, 1.6, 1.3, { size: 1.2 });
+      burst(p, 0xffffff, 16, 1.2, 0.7, 0.4);
+    } else { // peony
+      burst(p, c1, 110, 7, 1.9, 1.8, { size: 1.15 });
+      burst(p, c2, 55, 3.8, 1.5, 1.5);
+      burst(p, 0xffffff, 14, 1.2, 0.6, 0.5);
+    }
+    flash.position.copy(p); flash.material.color.setHex(c1); flashT = 0.35; // 하늘이 번쩍
+  }
+  function launch(x, z, c, mine, h = 7, shape = null) {
     const y0 = Math.max(groundY(x, z), ctx.waterY ?? -1e9) + 0.5; // 물 위에서 쏘면 물 높이부터
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff4c0 }));
     head.position.set(x, y0, z); head.userData.dynamic = true;
     scene.add(head);
     const fuse = 1.0 + Math.random() * 0.15;
     // 중력 6 기준으로 fuse 초 뒤 딱 h 높이에서 터져요
-    rockets.push({ head, vy: (h + 3 * fuse * fuse) / fuse, color: FW_COLORS[c % FW_COLORS.length], color2: FW_COLORS[(c + 3) % FW_COLORS.length], trail: 0, t: 0, fuse });
+    rockets.push({ head, vy: (h + 3 * fuse * fuse) / fuse, color: FW_COLORS[c % FW_COLORS.length], color2: FW_COLORS[(c + 3) % FW_COLORS.length], trail: 0, t: 0, fuse, shape: shape || SHAPES[(c + Math.floor(h * 7)) % SHAPES.length] });
     tone(300, 0.5, 'sawtooth', 0.012); tone(600, 0.4, 'sine', 0.01, 0.1);
     if (mine) { const m = multi(); if (m) m.sendFx('firework', x, z, c); }
     festival.push(performance.now());
   }
   function updateRockets(dt) {
+    if (flashT > 0) { flashT -= dt; flash.material.opacity = Math.max(0, flashT) * (isNight() ? 0.9 : 0.4); flash.scale.setScalar(6 + (0.35 - flashT) * 40); } else flash.material.opacity = 0;
     for (let i = rockets.length - 1; i >= 0; i--) {
       const r = rockets[i];
       r.t += dt; r.vy -= 6 * dt;
       r.head.position.y += r.vy * dt;
       r.head.position.x += Math.sin(r.t * 9) * 0.02;
       r.trail += dt;
-      if (r.trail > 0.03) { r.trail = 0; burst(r.head.position, 0xffc860, 1, 0.4, 0.5, 1); }
+      if (r.trail > 0.025) { r.trail = 0; burst(r.head.position, 0xffc860, 2, 0.5, 0.6, 1, { size: 0.7 }); }
       if (r.t > r.fuse) {
         const p = r.head.position;
-        burst(p, r.color, 70, 6.5, 1.7, 1.8);
-        burst(p, r.color2, 36, 3.5, 1.4, 1.5);
-        burst(p, 0xffffff, 10, 1.2, 0.6, 0.5);
+        explode(p, r.color, r.color2, r.shape);
         const near = Math.sqrt(dist2(p, me()));
         const vol = Math.max(0.005, 0.05 - near * 0.0008);
         tone(90, 0.35, 'sawtooth', vol); tone(140, 0.25, 'square', vol * 0.6, 0.02);
@@ -143,8 +185,12 @@ export function setupCoop(ctx) {
     const t = (toMe + 14) / hl;
     const x = cp.x + dir.x * t, z = cp.z + dir.z * t;
     const base = Math.max(groundY(x, z), ctx.waterY ?? -1e9) + 0.5;
-    const h = Math.min(16, Math.max(4, cp.y + dir.y * t - base)); // 터질 높이 (4~16칸)
-    launch(x, z, Math.floor(Math.random() * 8), true, h);
+    const h = Math.min(17, Math.max(7, cp.y + dir.y * t - base + 1)); // 터질 높이 (7~17칸, 화면 안에서 크게)
+    // 한 번에 5발이 시간차로 연달아: 가운데 큰 거 + 양옆 + 위로 높이 (모양 · 색이 전부 달라요)
+    const side = new THREE.Vector3(dir.z, 0, -dir.x).normalize();
+    const plan = [[0, 0, 0], [-6, -2, 350], [6, -2, 700], [-3, 4, 1050], [3, 6, 1400]];
+    const c0 = Math.floor(Math.random() * 8);
+    plan.forEach(([off, dh, ms], i) => setTimeout(() => launch(x + side.x * off, z + side.z * off, c0 + i * 3, true, h + dh, SHAPES[(c0 + i * 2) % SHAPES.length]), ms));
     notice(`펑! 불꽃놀이 남은 개수 ${save.fireworks}개${isNight() ? '' : ' (밤에 쏘면 더 예뻐요)'}`);
   }
 
@@ -203,12 +249,15 @@ export function setupCoop(ctx) {
   ring.rotation.x = -Math.PI / 2; evGroup.add(ring);
   const ring2 = new THREE.Mesh(new THREE.CircleGeometry(3.6, 48), new THREE.MeshBasicMaterial({ color: 0xffe890, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending }));
   ring2.rotation.x = -Math.PI / 2; ring2.position.y = -0.01; evGroup.add(ring2);
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 2.2, 14, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
-  beam.position.y = 7; evGroup.add(beam);
+  // 하늘 높이 솟는 금빛 기둥 (마을 어디서든 보여요) + 안쪽 밝은 심지
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 3.4, 46, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  beam.position.y = 23; evGroup.add(beam);
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.9, 46, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xffffe0, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  core.position.y = 23; evGroup.add(core);
   // 금빛 물고기가 퐁퐁 뛰어올라요
   const goldMat = new THREE.MeshStandardMaterial({ color: 0xffc830, emissive: 0xffa010, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
   const jumpers = Array.from({ length: 6 }, (_, i) => {
-    const f = new THREE.Group();
+    const f = new THREE.Group(); f.scale.setScalar(1.8); // 크게 (잘 보이게)
     const bd = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.5), goldMat); f.add(bd);
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.24, 0.16), goldMat); tl.position.z = -0.32; f.add(tl);
     evGroup.add(f);
@@ -237,13 +286,14 @@ export function setupCoop(ctx) {
       evShown = ev.slot;
       evPos = new THREE.Vector3(ev.x, (ctx.waterY ?? 0.02) + 0.04, ev.z);
       evGroup.position.copy(evPos);
-      notice('황금 물고기 떼가 나타났어요! 금빛 물결 안에 찌를 던져 봐요. 친구와 함께라면 운이 더 올라가요.');
+      notice('황금 물고기 떼가 나타났어요! 큰 호수의 금빛 기둥 아래 동그란 물결 안에 찌를 던지면 운이 올라가요.');
+      if (ctx.banner) ctx.banner('황금 물고기 떼!', '큰 호수에 금빛 기둥이 솟았어요 — 기둥 아래 금빛 물결 안에 찌를 던지면 3분 동안 운 +10% (친구와 함께면 더!)', '#ffd84a', 6500);
       tone(660, 0.15, 'triangle', 0.05); tone(990, 0.2, 'triangle', 0.05, 0.12); tone(1320, 0.3, 'sine', 0.05, 0.26);
     }
     evGroup.visible = true;
     ring.material.opacity = 0.45 + Math.sin(t * 3) * 0.2;
     ring.scale.setScalar(1 + Math.sin(t * 1.5) * 0.04);
-    beam.material.opacity = 0.08 + Math.sin(t * 2) * 0.04;
+    beam.material.opacity = 0.18 + Math.sin(t * 2) * 0.06; core.material.opacity = 0.3 + Math.sin(t * 3) * 0.1;
     for (const j of jumpers) {
       j.t += dt;
       const ph = (j.t % 3.2) / 0.9; // 0~1 뛰는 동안, 그 뒤엔 물속
@@ -257,7 +307,13 @@ export function setupCoop(ctx) {
     }
     const mates = others().filter((o) => (o.x - ev.x) ** 2 + (o.z - ev.z) ** 2 < 12 * 12).length;
     const s = Math.ceil(ev.left / 1000);
-    const txt = `황금 물고기 떼 · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} 남음 · 물결 안 운 +${Math.round((0.1 + Math.min(4, mates) * 0.05) * 100)}%${mates ? ` (함께 ${mates}명)` : ' · 친구와 함께면 더 올라가요'}`;
+    // 어디로 가야 하는지: 카메라 기준 화살표 + 거리 / 찌가 물결 안이면 "적용 중"
+    const pp = ctx.person.position, ddx = ev.x - pp.x, ddz = ev.z - pp.z, dist = Math.hypot(ddx, ddz);
+    let ang = Math.atan2(-ddx, -ddz) - (ctx.cam ? ctx.cam.yaw : 0); ang = Math.atan2(Math.sin(ang), Math.cos(ang));
+    const arrow = ['↑', '↖', '←', '↙', '↓', '↘', '→', '↗'][((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8];
+    const inside = eventBonus() > 0;
+    const where = inside ? '찌가 금빛 물결 안! 운 적용 중' : dist < 6 ? '금빛 물결 안에 찌를 던져요' : `큰 호수 ${arrow} ${Math.round(dist)}m`;
+    const txt = `황금 물고기 떼 · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} 남음 · ${where} · 운 +${Math.round((0.1 + Math.min(4, mates) * 0.05) * 100)}%${mates ? ` (함께 ${mates}명)` : ''}`;
     if (hud.textContent !== txt) hud.textContent = txt;
     hud.classList.remove('hidden');
   }
@@ -273,7 +329,7 @@ export function setupCoop(ctx) {
     interact(s) { if (s.kind === 'fwshop') { renderFw(); openPanel(fwPanel); return true; } return false; },
     luckBonus: eventBonus, rockets, sparks,
     onFx(r, m) {
-      if (m.k === 'firework') { friendFw = performance.now(); launch(m.x, m.z, m.c | 0, false); }
+      if (m.k === 'firework') { friendFw = performance.now(); launch(m.x, m.z, m.c | 0, false, 14); }
       else if (m.k === 'wave') { bubble(r.group, WAVES[(m.c | 0) % WAVES.length]); tone(880, 0.06, 'triangle', 0.03); }
     },
     update(dt, t, now) {

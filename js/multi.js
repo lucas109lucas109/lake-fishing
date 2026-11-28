@@ -14,6 +14,8 @@ export const PLAYER_LOOKS = [
   { skin: 0xe2b896, shirt: 0xb8e0ff, vest: 0xf0ece0, vestPocket: 0xd0ccc0, pants: 0x3a4a5a, boots: 0x4a3020, hair: 'short', hairColor: 0x8a5a3a }
 ];
 
+import { PETS, buildPet } from './pets.js';
+
 export function setupMulti(ctx) {
   const { THREE, scene, makeBlockPerson, buildRod, placeSpin, RODS, ROD_LEN, makeBobber, cordMat, makeNameTag,
     makeFishModel, findFish, fishScale, getMyState, onFeed, onStatus, outfitToLook, makeBoatModel, getOutfit } = ctx;
@@ -135,7 +137,7 @@ export function setupMulti(ctx) {
     const line = new THREE.Line(new THREE.BufferGeometry(), cordMat);
     line.visible = false;
     scene.add(line);
-    remotes.set(p.id, { id: p.id, name: p.name, ...body, rodG, rodIdx: -2, spin: [], tag, boat: null, boatIdx: -1, shownN: s.n || 0, bob, line, s, held: null, heldKey: '', arm: 1.2, walkT: 0, pop: null, prev: body.group.position.clone() });
+    remotes.set(p.id, { id: p.id, name: p.name, ...body, rodG, rodIdx: -2, spin: [], tag, boat: null, boatIdx: -1, shownN: s.n || 0, bob, line, s, held: null, heldKey: '', arm: 1.2, walkT: 0, pop: null, prev: body.group.position.clone(), pets: [] });
   }
   function removeRemote(id) {
     const r = remotes.get(id);
@@ -143,6 +145,7 @@ export function setupMulti(ctx) {
     scene.remove(r.group, r.bob, r.line);
     if (r.boat) scene.remove(r.boat);
     if (r.pop) scene.remove(r.pop.model);
+    for (const pt of r.pets) scene.remove(pt.rig.root);
     remotes.delete(id);
   }
   function clearRemotes() { for (const id of [...remotes.keys()]) removeRemote(id); }
@@ -205,6 +208,19 @@ export function setupMulti(ctx) {
         r.boat.rotation.set(0, g.rotation.y, Math.sin(t * 1.1) * 0.03);
       }
       if (s.n !== r.shownN) { r.shownN = s.n; r.tag.draw(r.name, s.n); }
+      // 그 사람이 데리고 다니는 반려동물 (최대 5마리): 종류가 바뀌면 새로 만들고, 받은 자리로 부드럽게 따라가요
+      const want = Array.isArray(s.pt) ? s.pt.filter((q) => Array.isArray(q) && PETS[q[0]]).slice(0, 5) : [];
+      if (want.map((q) => q[0]).join(',') !== r.pets.map((q) => q.idx).join(',')) {
+        for (const pt of r.pets) scene.remove(pt.rig.root);
+        r.pets = want.map((q) => { const rig = buildPet(THREE, PETS[q[0]]); rig.root.position.set(q[1], q[2], q[3]); scene.add(rig.root); return { idx: q[0], rig, ph: Math.random() * 6 }; });
+      }
+      r.pets.forEach((pt, i) => {
+        const q = want[i], root = pt.rig.root;
+        root.position.x += (q[1] - root.position.x) * k; root.position.z += (q[3] - root.position.z) * k;
+        const hop = q[5] ? Math.abs(Math.sin(t * 10 + pt.ph)) * 0.08 : 0;
+        root.position.y += (q[2] + hop - root.position.y) * k;
+        let dry = q[4] - root.rotation.y; dry = Math.atan2(Math.sin(dry), Math.cos(dry)); root.rotation.y += dry * k;
+      });
       // 낚싯대 바꾸기 / 꺼내기
       if (s.rod !== r.rodIdx) {
         r.rodIdx = s.rod;

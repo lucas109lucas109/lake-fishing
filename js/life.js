@@ -89,7 +89,7 @@ export function cleanLife(s, out) {
   out.garden = {};
   if (s.garden && typeof s.garden === 'object') for (const hid of out.homes || []) {
     const list = Array.isArray(s.garden[hid]) ? s.garden[hid] : [];
-    out.garden[hid] = [0, 1, 2, 3, 4, 5].map((i) => { const p = list[i]; return p && CROPS[p.c] && Number.isFinite(p.at) ? { c: p.c, at: intIn(p.at, 0, 1e15, 0) } : null; });
+    out.garden[hid] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => { const p = list[i]; return p && CROPS[p.c] && Number.isFinite(p.at) ? { c: p.c, at: intIn(p.at, 0, 1e15, 0) } : null; });
   }
   // (반려동물 · 친밀도 · 보상 · 칭호는 아래 cleanLife2 에서)
   cleanLife2(s, out, intIn);
@@ -271,7 +271,7 @@ export function setupLife(ctx) {
     }
     if (newId && !save.decor[newId]) save.decor[newId] = [];
     if (newId) seedHome(houseOf(newId));
-    if (newId && !save.garden[newId]) save.garden[newId] = [null, null, null, null, null, null];
+    if (newId && !save.garden[newId]) save.garden[newId] = Array(PLOTS).fill(null);
     for (const h of seaWorld.houses) { rebuildDecor(h.id); rebuildGarden(h.id); }
     pets.sync(); // 집에서 노는 동물들도 새 집으로
   }
@@ -550,9 +550,11 @@ export function setupLife(ctx) {
   });
 
   // =====================================================
-  //  정원 텃밭: 산 집 옆 마당에 밭 6칸. 씨앗을 심으면 시간이 지나 자라요 (게임을 꺼도 자라요)
+  //  정원 텃밭: 산 집 양옆 마당에 밭 10칸. 씨앗을 심으면 시간이 지나 자라요 (게임을 꺼도 자라요)
+  //  텃밭 창에서 씨앗을 바로 살 수도 있어요
   // =====================================================
   const plotMeshes = new Map(); // houseId → [{ soil, crop, entry }]
+  const PLOTS = 10;
   const cropModel = (c, stage) => {
     // stage 0 새싹 · 1 자라는 중 · 2 다 자람
     const fake = { kind: 'herb', color: 0x5ab84a };
@@ -565,25 +567,36 @@ export function setupLife(ctx) {
     if (spec.kind === 'melonG') { const g = new THREE.Group(); const o = matModel({ kind: 'fruit', color: 0x2a8a3a }); o.scale.set(3.2, 2.4, 3.2); g.add(o); g.userData.dynamic = true; return g; }
     return matModel(spec);
   };
-  function plotPos(h, i) { const e = h.ext || h; return { x: e.x0 - 1.15, z: e.z0 + 0.9 + i * ((e.z1 - e.z0 - 1.6) / 5) }; }
+  // 텃밭 10칸은 모두 바깥: 0~4 = 집 왼쪽 마당, 5~9 = 집 오른쪽 마당 (울타리 안)
+  function plotPos(h, i) {
+    const e = h.ext || h, side = i < 5 ? -1 : 1, k = i % 5;
+    return { x: side < 0 ? e.x0 - 1.15 : e.x1 + 1.15, z: e.z0 + 0.9 + k * ((e.z1 - e.z0 - 1.8) / 4), y: 0.22 };
+  }
   function rebuildGarden(hid) {
     for (const p of plotMeshes.get(hid) || []) { scene.remove(p.soil); if (p.crop) scene.remove(p.crop); p.entry.off = true; }
     const h = houseOf(hid);
     if (!h) return;
     if (!save.homes.includes(hid)) { plotMeshes.set(hid, (plotMeshes.get(hid) || []).map((p) => ({ ...p, crop: null }))); return; }
-    if (!save.garden[hid]) save.garden[hid] = [null, null, null, null, null, null];
+    if (!save.garden[hid]) save.garden[hid] = Array(PLOTS).fill(null);
+    while (save.garden[hid].length < PLOTS) save.garden[hid].push(null); // 예전 세이브는 6칸이었어요
     const old = plotMeshes.get(hid) || [];
     const list = [];
-    for (let i = 0; i < 6; i++) {
-      const { x, z } = plotPos(h, i);
+    for (let i = 0; i < PLOTS; i++) {
+      const { x, z, y: py, inside } = plotPos(h, i);
       const soil = new THREE.Group();
       const dirt = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.12, 0.95), new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 1 }));
       dirt.position.y = 0.06; dirt.receiveShadow = true; soil.add(dirt);
       for (let k = 0; k < 3; k++) { const row = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.04, 0.12), new THREE.MeshStandardMaterial({ color: 0x5a3a1e })); row.position.set(0, 0.13, -0.3 + k * 0.3); soil.add(row); }
       for (const [fx, fz, w, d] of [[0, 0.5, 1.05, 0.08], [0, -0.5, 1.05, 0.08], [0.5, 0, 0.08, 1.05], [-0.5, 0, 0.08, 1.05]]) { const e = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, d), new THREE.MeshStandardMaterial({ color: 0xa8784a })); e.position.set(fx, 0.08, fz); soil.add(e); }
-      soil.position.set(x, 0.22, z); soil.userData.dynamic = true;
+      if (inside) { // 집 안: 나무 화분 상자 (테두리 높게 + 다리 4개 + 나뭇결)
+        const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.3, 1.1), new THREE.MeshStandardMaterial({ color: 0x8a5a32, roughness: 0.9 })); box.position.y = 0.05; soil.add(box);
+        for (const [lx, lz] of [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]]) { const lg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.1), box.material); lg.position.set(lx, -0.13, lz); soil.add(lg); }
+        for (let k = 0; k < 4; k++) { const gr = new THREE.Mesh(new THREE.BoxGeometry(1.115, 0.012, 0.02), new THREE.MeshStandardMaterial({ color: 0x6a4224 })); gr.position.set(0, -0.04 + k * 0.06, -0.556); soil.add(gr); }
+        dirt.position.y = 0.16;
+      }
+      soil.position.set(x, inside ? py + 0.2 : 0.22, z); soil.userData.dynamic = true;
       scene.add(soil);
-      const entry = old[i]?.entry || { kind: 'plot', title: '', group: new THREE.Group(), pos: new THREE.Vector3(x, 0.25, z), promptAt: new THREE.Vector3(x, 1.4, z), r: 1.0 };
+      const entry = old[i]?.entry || { kind: 'plot', title: '', group: new THREE.Group(), pos: new THREE.Vector3(x, 0.25, z), promptAt: new THREE.Vector3(x, (inside ? py : 0) + 1.4, z), r: 1.0 };
       if (!old[i]) shops.push(entry);
       entry.house = h; entry.idx = i; entry.off = false;
       list.push({ soil, crop: null, entry, stage: -1 });
@@ -633,8 +646,19 @@ export function setupLife(ctx) {
     // 씨앗 고르기
     const seeds = MATS.filter((m) => m.kind === 'seed' && (save.mats[m.id] || 0) > 0);
     const body = seedPanel.querySelector('.pbody');
-    body.innerHTML = `<div class="count">심을 씨앗을 골라요. 씨앗은 맵에서 주울 수 있어요. 게임을 꺼도 계속 자라요!</div>`;
-    if (!seeds.length) body.insertAdjacentHTML('beforeend', '<div class="count">씨앗이 없어요. 호숫가·숲·섬에서 씨앗을 주워 와요.</div>');
+    body.innerHTML = `<div class="count">심을 씨앗을 골라요. 씨앗은 맵에서 줍거나 아래에서 살 수 있어요. 게임을 꺼도 계속 자라요!</div>`;
+    if (!seeds.length) body.insertAdjacentHTML('beforeend', '<div class="count">가진 씨앗이 없어요. 아래 씨앗 가게에서 사거나 호숫가·숲·섬에서 주워 와요.</div>');
+    // 씨앗 가게 (값은 씨앗 값의 2배)
+    body.insertAdjacentHTML('beforeend', '<h3 class="chartH">씨앗 가게</h3>');
+    for (const m of MATS.filter((q) => q.kind === 'seed')) {
+      const price = m.price * 2;
+      const row = document.createElement('div'); row.className = 'sellRow';
+      row.innerHTML = `<span class="nm">${esc(m.name)} <span style="color:#aaa">${CROPS[m.grows]}분 뒤 ${esc(findMat(m.grows).name)} · 가진 ${save.mats[m.id] || 0}개</span></span><span class="pr">${money(price)}</span>`;
+      const b = document.createElement('button'); b.className = 'actBtn'; b.textContent = '사기'; b.disabled = save.money < price;
+      b.onclick = () => { if (save.money < price) return; save.money -= price; save.mats[m.id] = (save.mats[m.id] || 0) + 1; writeSave(); updateUI(); usePlot(entry); };
+      row.appendChild(b); body.appendChild(row);
+    }
+    body.insertAdjacentHTML('beforeend', '<h3 class="chartH">가진 씨앗</h3>');
     for (const m of seeds) {
       const row = document.createElement('div');
       row.className = 'sellRow';
@@ -708,7 +732,10 @@ function cleanLife2(s, out, intIn) {
     love[id] = intIn(ps.love?.[id], 0, 100, 20);
     if (typeof ps.nm?.[id] === 'string') { const v = ps.nm[id].replace(/[<>]/g, '').trim().slice(0, 10); if (v) nm[id] = v; }
   }
-  out.pets = { own, on: own.includes(ps.on) ? ps.on : null, love, nm, t: intIn(ps.t, 0, 1e15, 0) };
+  // team = 데리고 다니는 친구들 (최대 5) · on = 맨 앞 친구 (예전 세이브는 on 하나만 있었어요)
+  let team = Array.isArray(ps.team) ? [...new Set(ps.team.filter((x) => own.includes(x)))].slice(0, 5) : [];
+  if (!team.length && own.includes(ps.on)) team = [ps.on];
+  out.pets = { own, on: team[0] || null, team, love, nm, t: intIn(ps.t, 0, 1e15, 0) };
   // 친구 (NPC 이름 → 점수 · 마지막 대화 · 선물 시각 · 받은 하트 보상 · 알아낸 취향)
   out.friends = {};
   if (s.friends && typeof s.friends === 'object') for (const [name, r] of Object.entries(s.friends).slice(0, 60)) {

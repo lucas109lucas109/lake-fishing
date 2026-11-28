@@ -15,9 +15,10 @@ export const RUBY_LAGOON = { x: RUBY.x + 24, z: RUBY.z + 4, rx: 9.5, rz: 7, y: 0
 export const TEMPLE = { x: RUBY.x - 4, z: RUBY.z + 22 };              // 루비 신전 (섬 남쪽 언덕)
 export const DOCK = { x: RUBY.x, z: RUBY.z - RUBY.r - 0.5 };           // 북쪽 선착장 (큰 바다 쪽)
 // 봉인: 어떤 물고기를 어떤 이로치로 몇 마리 바쳐야 하는지
+//  봉인을 풀면 신전 문이 열리고, 성소 연못에서 보스(boss)를 낚아야 그 낚싯대를 살 수 있어요
 export const SEALS = [
-  { id: 's1', name: '홍염의 봉인', fish: '불꽃 루비 가오리', mut: '다크', need: 2, rod: '루비 신전의 홍염 낚싯대' },
-  { id: 's2', name: '왕관의 봉인', fish: '루비 용왕', mut: '핏빛', need: 2, rod: '루비 왕관 낚싯대' }
+  { id: 's1', name: '홍염의 봉인', fish: '홍염 날개어', mut: '다크', need: 1, rod: '루비 신전의 홍염 낚싯대', boss: '성소의 홍염 수호룡' },
+  { id: 's2', name: '왕관의 봉인', fish: '홍옥 바다용', mut: '핏빛', need: 1, rod: '루비 왕관 낚싯대', boss: '루비 왕관의 군주' }
 ];
 
 const smooth = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
@@ -295,8 +296,21 @@ export function buildRuby(ctx) {
     for (const s of [-1, 1]) { for (let k = 0; k < 5; k++) tiny.add(BOX, 0x7a2a2e, [x + s * 0.55, T3 + 0.4 + k * 0.6, z - 1.57], [0, 0, 0], [0.9, 0.5, 0.02]); shiny.add(BOX, GOLD, [x + s * 0.18, T3 + 1.5, z - 1.6], [0, 0, 0], [0.08, 0.5, 0.05]); }
     shiny.add(BOX, GOLD, [x, T3 + 3.3, z - 1.55], [0, 0, 0], [2.6, 0.2, 0.12]);
     for (const s of [-1, 1]) shiny.add(BOX, GOLD, [x + s * 1.2, T3 + 1.6, z - 1.55], [0, 0, 0], [0.2, 3.3, 0.12]);
-    for (let k = 0; k < 11; k++) shiny.add(BOX, 0x8a8a90, [x - 1.0 + k * 0.2, T3 + 1.5 + Math.sin(k / 10 * Math.PI) * -0.25, z - 1.63], [0, 0, k % 2 ? 0 : 1.57], [0.14, 0.08, 0.04]); // 사슬
-    shiny.add(BOX, 0x6a6a70, [x, T3 + 1.25, z - 1.66], [0, 0, 0], [0.32, 0.36, 0.08]);               // 자물쇠
+    // 사슬 · 자물쇠: 봉인이 풀리면 사라져요 (따로 움직이는 덩어리) / 열리면 문 안쪽이 붉게 빛나요
+    const lockG = new THREE.Group(); lockG.userData.dynamic = true;
+    const chainM = new THREE.MeshStandardMaterial({ color: 0x8a8a90, roughness: 0.35, metalness: 0.5 });
+    for (let k = 0; k < 11; k++) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.04), chainM); c.position.set(x - 1.0 + k * 0.2, T3 + 1.5 + Math.sin(k / 10 * Math.PI) * -0.25, z - 1.63); c.rotation.z = k % 2 ? 0 : 1.57; lockG.add(c); }
+    const lockM = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.36, 0.08), new THREE.MeshStandardMaterial({ color: 0x6a6a70, roughness: 0.4, metalness: 0.5 }));
+    lockM.position.set(x, T3 + 1.25, z - 1.66); lockG.add(lockM);
+    scene.add(lockG); fx.lock = lockG;
+    const openGlow = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 3.0), new THREE.MeshBasicMaterial({ color: 0xff3a2a, transparent: true, opacity: 0.85 }));
+    openGlow.position.set(x, T3 + 1.6, z - 1.66); openGlow.rotation.y = Math.PI; openGlow.visible = false; openGlow.userData.dynamic = true;
+    scene.add(openGlow); fx.openGlow = openGlow;
+    // 보스가 기다리는 동안 하늘로 솟는 붉은 빛기둥 (멀리서도 "저기로 가야 해!" 가 보여요)
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 60, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    beam.position.set(x, T3 + 30, z - 4); beam.visible = false; beam.userData.dynamic = true;
+    scene.add(beam); fx.beam = beam;
+    fx.door = { x, z: z - 1.53, y: T3 };
     // 회랑 기둥 (앞 6 · 옆 3씩)
     const colAt = (cx, cz) => {
       deco.add(BOX, DK, [cx, T3 + 0.12, cz], [0, 0, 0], [0.7, 0.24, 0.7]);
@@ -441,23 +455,31 @@ export function buildRuby(ctx) {
 
   const inIsland = (x, z) => (x - RX) ** 2 + (z - RZ) ** 2 < R * R;
   return {
-    stands, sealSpots, dockAt: { x: DOCK.x, z: DOCK.z - 7.5 }, arriveAt: { x: DOCK.x, z: DOCK.z + 1.5 },
+    stands, sealSpots, door: fx.door, dockAt: { x: DOCK.x, z: DOCK.z - 7.5 }, arriveAt: { x: DOCK.x, z: DOCK.z + 1.5 },
     inIsland, blocked: (x, z) => rects.some((r) => x > r[0] && x < r[2] && z > r[1] && z < r[3]),
     // 봉인 상태에 맞게 고리 · 문양 보여 주기 (풀린 봉인은 꺼져요)
+    //  봉인 2개가 모두 풀리면 신전 문이 열려요 (사슬이 사라지고 문 안이 붉게) · 보스가 남아 있으면 빛기둥
     setSeals(save) {
+      let openN = 0, pending = false;
       for (const s of sealSpots) {
         const open = (save.ruby[s.seal.id] || 0) >= s.seal.need;
         s.r1.visible = s.r2.visible = !open;
         s.emblem.visible = true;
         s.ringM.emissiveIntensity = open ? 0.2 : 1.3;
         s.open = open;
+        if (open) openN++;
+        if (!(save.ruby.boss && save.ruby.boss[s.seal.id])) pending = true;
       }
+      const allOpen = openN === sealSpots.length; // 봉인 2개가 모두 풀려야 문이 열려요
+      fx.lock.visible = !allOpen; fx.openGlow.visible = allOpen; fx.beam.visible = allOpen && pending;
     },
     update(t) {
       for (const b of fx.spin) { b.rotation.y = t * 0.5; b.position.y += Math.sin(t * 1.3) * 0.003; }
       fx.rings.forEach((r, i) => { r.rotation.x = Math.PI / 2 + Math.sin(t * 0.7 + i) * 0.3; r.rotation.y = t * (0.6 + i * 0.13); });
       for (const s of sealSpots) { s.emblem.rotation.y = t * 1.2; s.emblem.position.y = s.y + 1.6 + Math.sin(t * 2 + s.idx) * 0.08; }
       fx.flames.forEach((f, i) => f.scale.set(1, 0.85 + Math.sin(t * 9 + i * 2) * 0.2, 1));
+      if (fx.beam.visible) { fx.beam.material.opacity = 0.16 + Math.sin(t * 2.2) * 0.07; fx.beam.rotation.y = t * 0.3; }
+      if (fx.openGlow.visible) fx.openGlow.material.opacity = 0.7 + Math.sin(t * 3) * 0.15;
     }
   };
 }

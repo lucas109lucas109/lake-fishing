@@ -2,6 +2,7 @@
 //  물고기 데이터 + 물고기 3D 모양 만들기
 // =====================================================
 import * as THREE from 'three';
+import { buildRubyFishBody } from './rubyfish.js';
 
 // 희귀도: speed/jump = 물고기가 얼마나 빠르게 날뛰는지 (초록 칸 크기는 낚싯대가 정해요)
 export const RARITY = {
@@ -241,65 +242,74 @@ FISH.push(
     look: { dragon: true, L: 2.2, h: 0.5, w: 0.5, color: 0x2f5a2a, belly: 0xc8b878, fin: 0xffc83a, pc: 0x6affb0, iris: 0x6affb0, glow: [0x6affb0], size: 5.6 } }
 );
 
-// =========== 루비 섬 (zone: 'ruby') — 최후반 콘텐츠! 루비 낚싯대로만 낚여요. 정글보다 훨씬 비싸요 ===========
-//  루비 신전의 봉인: '불꽃 루비 가오리' [핏빛] 2마리 / '루비 용왕' [다이아] 2마리를 바쳐야 풀려요 (ruby.js)
+// =========== 루비 섬 (zone: 'ruby') — 최후반 콘텐츠! 루비 공방 낚싯대로만 낚여요. 정글보다 훨씬 비싸요 ===========
+//  다른 곳 물고기를 색만 바꾼 게 아니라, 루비 섬에만 사는 새 생김새의 생물들이에요 (모양은 rubyfish.js 의 rk)
+//  루비 신전의 봉인: '홍염 날개어' [다크] 2마리 / '홍옥 바다용' [핏빛] 2마리를 바쳐야 풀려요 (ruby.js)
 FISH.push(
-  { name: '루비 송사리', zone: 'ruby', rarity: 'common', w: [0.2, 1.2], perKg: 60000,
-    look: { L: 0.7, h: 0.18, w: 0.1, color: 0xd8203a, belly: 0xffc8d0, fin: 0xff6a7a, pattern: 'band', pc: 0xff8a9a, iris: 0xffe0e6, glow: [0xff8a9a], size: 0.9 } },
-  { name: '홍옥 붕어', zone: 'ruby', rarity: 'common', w: [0.5, 3], perKg: 40000,
-    look: { L: 0.8, h: 0.38, w: 0.16, color: 0xb0182a, belly: 0xff9aa8, fin: 0x7a0a1a, pattern: 'scales', pc: 0xff5a6a, iris: 0xffd84a, size: 1.1 } },
-  { name: '석류 복어', zone: 'ruby', rarity: 'uncommon', w: [0.8, 4], perKg: 70000,
-    look: { puffer: true, spikes: true, L: 0.7, h: 0.6, w: 0.6, color: 0xc8283a, belly: 0xffe0e4, fin: 0xff7a8a, pattern: 'spots', pc: 0xffd0d8, iris: 0x2a0a10, size: 1.2 } },
-  { name: '진홍 아로와나', zone: 'ruby', rarity: 'uncommon', w: [3, 14], perKg: 30000,
-    look: { L: 1.4, h: 0.28, w: 0.15, color: 0xd8302a, belly: 0xffd8c8, fin: 0xff9a3a, pattern: 'scales', pc: 0xffc04a, whiskers: true, longDorsal: true, smooth: true, size: 1.6 } },
-  { name: '루비 비늘 잉어', zone: 'ruby', rarity: 'rare', w: [8, 40], perKg: 25000,
-    look: { L: 1.2, h: 0.42, w: 0.24, color: 0x9a1020, belly: 0xffc0c8, fin: 0xff4a5a, whiskers: true, crystals: 0xff3a5a, iris: 0xffffff, glow: [0xff3a5a], size: 2.6 } },
-  { name: '용암 루비 장어', zone: 'ruby', rarity: 'rare', w: [10, 50], perKg: 22000,
-    look: { eel: true, L: 1.8, h: 0.17, w: 0.15, color: 0x3a0a10, belly: 0xff7a3a, fin: 0xff3a1a, lava: true, longDorsal: true, pattern: 'stripes', pc: 0xff5a1a, iris: 0xffe23a, glow: [0xff5a1a, 0xffe23a], size: 2.4 } },
-  { name: '불꽃 루비 가오리', zone: 'ruby', rarity: 'legendary', w: [150, 600], perKg: 9000,
-    look: { ray: true, L: 1.0, h: 0.12, w: 1.3, color: 0x7a0a18, belly: 0xffd0d8, fin: 0xd8203a, pc: 0xffb03a, glow: [0xffb03a], size: 6.4 } },
-  { name: '홍염 수호 메기', zone: 'ruby', rarity: 'legendary', w: [80, 300], perKg: 12000,
-    look: { L: 1.4, h: 0.3, w: 0.3, color: 0x5a1018, belly: 0xd88a8a, fin: 0x3a0810, whiskers: true, longWhisk: true, smooth: true, crystals: 0xff2a4a, iris: 0xff2a4a, glow: [0xff2a4a], size: 3.6 } },
-  { name: '루비 여왕 해마', zone: 'ruby', rarity: 'legendary', w: [3, 12], perKg: 180000,
-    look: { seahorse: true, L: 0.5, h: 1.0, w: 0.3, color: 0xe8203a, belly: 0xffd0d8, fin: 0xffd84a, crown: true, iris: 0xffffff, glow: [0xffd84a], size: 2.2 } },
   // ---- 흔함 ----
-  { name: '붉은 유리 피라미', zone: 'ruby', rarity: 'common', w: [0.1, 0.6], perKg: 90000,
-    look: { L: 0.62, h: 0.15, w: 0.08, color: 0xff5a6a, belly: 0xfff0f2, fin: 0xd8203a, pattern: 'stripes', pc: 0xb0102a, ghost: 0.7, size: 0.85 } },
-  { name: '산호빛 블루길', zone: 'ruby', rarity: 'common', w: [0.3, 1.5], perKg: 55000,
-    look: { L: 0.62, h: 0.4, w: 0.13, color: 0xe85a5a, belly: 0xffd07a, fin: 0xa8202a, pattern: 'stripes', pc: 0x9a1a2a, gill: true, size: 1.0 } },
-  { name: '불씨 빙어', zone: 'ruby', rarity: 'common', w: [0.05, 0.3], perKg: 160000,
-    look: { L: 0.56, h: 0.11, w: 0.07, color: 0xffb0a0, belly: 0xfff6f0, fin: 0xff6a3a, pattern: 'band', pc: 0xff7a3a, glow: [0xff7a3a], size: 0.7 } },
-  { name: '루비 미꾸라지', zone: 'ruby', rarity: 'common', w: [0.1, 0.5], perKg: 110000,
-    look: { L: 0.66, h: 0.11, w: 0.09, color: 0x8a1a22, belly: 0xffb0a0, fin: 0x6a0a14, pattern: 'spots', pc: 0xff4a5a, eel: true, whiskers: true, size: 0.8 } },
-  { name: '자수정 각시붕어', zone: 'ruby', rarity: 'common', w: [0.1, 0.8], perKg: 80000,
-    look: { L: 0.6, h: 0.32, w: 0.12, color: 0xb02a5a, belly: 0xffd0e8, fin: 0xff7ab8, blush: 0xff5a9a, iris: 0xffffff, size: 0.85 } },
+  { name: '홍옥 원석어', zone: 'ruby', rarity: 'common', w: [0.2, 1.2], perKg: 60000,
+    look: { rk: 'facet', L: 0.8, h: 0.42, w: 0.24, color: 0xc8203a, belly: 0xff8a9a, fin: 0x8a0a1a, pc: 0xff9aa8, gem: 0xff3a5a, iris: 0xffe0e6, glow: [0xff3a5a], size: 1.0 } },
+  { name: '불씨 초롱어', zone: 'ruby', rarity: 'common', w: [0.3, 1.5], perKg: 50000,
+    look: { rk: 'lantern', L: 0.7, h: 0.5, w: 0.5, color: 0xe85a3a, belly: 0xffd0b0, fin: 0xb8202a, pc: 0x8a1a14, gem: 0xffb02a, glow: [0xffb02a], size: 0.95 } },
+  { name: '석류 구슬어', zone: 'ruby', rarity: 'common', w: [0.1, 0.8], perKg: 90000,
+    look: { rk: 'orb', L: 0.9, h: 0.3, w: 0.3, color: 0xa8102a, belly: 0xffc0c8, fin: 0xff6a7a, pc: 0xd8304a, gem: 0xffd0d8, glow: [0xffd0d8], size: 0.9 } },
+  { name: '루비 칼날치', zone: 'ruby', rarity: 'common', w: [0.2, 1.0], perKg: 80000,
+    look: { rk: 'blade', L: 1.0, h: 0.2, w: 0.07, color: 0xd8d0d4, belly: 0xf4eef0, fin: 0xa8182a, pc: 0xffffff, gem: 0xff2a4a, glow: [0xff2a4a], size: 1.0 } },
+  { name: '진홍 꽃잎어', zone: 'ruby', rarity: 'common', w: [0.3, 2.0], perKg: 55000,
+    look: { rk: 'flower', L: 0.75, h: 0.42, w: 0.3, color: 0xe84a6a, belly: 0xffe0e8, fin: 0xff9ab8, pc: 0xd8203a, gem: 0xffe23a, glow: [0xffe23a], size: 1.0 } },
+  { name: '홍옥 소라고기', zone: 'ruby', rarity: 'common', w: [0.2, 1.0], perKg: 85000,
+    look: { rk: 'shell', L: 0.75, h: 0.5, w: 0.36, color: 0xc84a4a, belly: 0xf4c8b8, fin: 0xff8a7a, pc: 0xe88a6a, gem: 0xff3a5a, glow: [0xff3a5a], size: 0.9 } },
+  { name: '핏빛 리본어', zone: 'ruby', rarity: 'common', w: [0.1, 0.6], perKg: 120000,
+    look: { rk: 'ribbon', L: 1.1, h: 0.16, w: 0.08, color: 0x8a0a1a, belly: 0xffb0b8, fin: 0xff3a4a, pc: 0xffd84a, gem: 0xff6a8a, glow: [0xff6a8a], size: 1.0 } },
   // ---- 희귀 ----
-  { name: '홍염 송어', zone: 'ruby', rarity: 'uncommon', w: [2, 9], perKg: 38000,
-    look: { L: 1.1, h: 0.3, w: 0.17, color: 0xc8402a, belly: 0xffe0c8, fin: 0xff8a3a, pattern: 'spots', pc: 0x5a0a10, blush: 0xff3a3a, size: 1.5 } },
-  { name: '루비 금붕어', zone: 'ruby', rarity: 'uncommon', w: [0.5, 3], perKg: 85000,
-    look: { L: 0.7, h: 0.45, w: 0.2, color: 0xff3a3a, belly: 0xffe8c8, fin: 0xffb03a, longDorsal: true, iris: 0x2a0a10, glow: [0xffb03a], size: 1.2 } },
-  { name: '진사 쏘가리', zone: 'ruby', rarity: 'uncommon', w: [1, 6], perKg: 60000,
-    look: { L: 0.95, h: 0.36, w: 0.16, color: 0xd8602a, belly: 0xfff0d0, fin: 0x8a2a14, pattern: 'blotch', pc: 0x3a0a08, bigMouth: true, size: 1.4 } },
-  { name: '붉은 수정 해파리', zone: 'ruby', rarity: 'uncommon', w: [0.5, 4], perKg: 75000,
-    look: { jelly: true, L: 0.6, h: 0.8, w: 0.6, color: 0xff4a6a, belly: 0xffd0dc, fin: 0xff8aa8, ghost: 0.65, glow: [0xff8aa8], size: 1.4 } },
+  { name: '홍염 초롱어', zone: 'ruby', rarity: 'uncommon', w: [2, 8], perKg: 38000,
+    look: { rk: 'lantern', L: 0.7, h: 0.5, w: 0.5, color: 0xb81a2a, belly: 0xffc0a0, fin: 0xff6a2a, pc: 0xffd84a, gem: 0xff6a1a, glow: [0xff6a1a], size: 1.6 } },
+  { name: '석류석 원석어', zone: 'ruby', rarity: 'uncommon', w: [2, 9], perKg: 40000,
+    look: { rk: 'facet', L: 0.8, h: 0.42, w: 0.24, color: 0x6a0a1a, belly: 0xc8304a, fin: 0x3a0610, pc: 0xd8506a, gem: 0xff2a4a, iris: 0xffd84a, glow: [0xff2a4a], size: 1.7 } },
+  { name: '보석눈 망치어', zone: 'ruby', rarity: 'uncommon', w: [3, 14], perKg: 30000,
+    look: { rk: 'hammer', L: 1.2, h: 0.3, w: 0.26, color: 0x7a3a44, belly: 0xf0d8d8, fin: 0x5a2030, pc: 0xd8a0a8, gem: 0xff2a4a, glow: [0xff2a4a], size: 1.9 } },
+  { name: '진홍 보석오징어', zone: 'ruby', rarity: 'uncommon', w: [1, 6], perKg: 60000,
+    look: { rk: 'squid', L: 1.0, h: 0.34, w: 0.34, color: 0xd8304a, belly: 0xffd0d8, fin: 0xff7a8a, pc: 0xb81a30, gem: 0xffe23a, glow: [0xffe23a], size: 1.5 } },
+  { name: '홍옥 등딱지어', zone: 'ruby', rarity: 'uncommon', w: [4, 15], perKg: 28000,
+    look: { rk: 'turtle', L: 0.9, h: 0.36, w: 0.6, color: 0x8a2a2a, belly: 0xe8c8a8, fin: 0x6a3a2a, pc: 0xb84a3a, gem: 0xff3a5a, glow: [0xff3a5a], size: 1.6 } },
+  { name: '붉은 왕관 소라고기', zone: 'ruby', rarity: 'uncommon', w: [1, 5], perKg: 70000,
+    look: { rk: 'shell', L: 0.75, h: 0.5, w: 0.36, color: 0x8a1020, belly: 0xffd0c0, fin: 0xffb03a, pc: 0xffd84a, gem: 0xffe23a, glow: [0xffe23a], size: 1.5 } },
   // ---- 매우 희귀 ----
-  { name: '석류석 아귀', zone: 'ruby', rarity: 'rare', w: [20, 90], perKg: 20000,
-    look: { angler: true, L: 1.1, h: 0.62, w: 0.6, color: 0x4a0a14, belly: 0x8a2a3a, fin: 0x2a0408, pc: 0xff6a3a, iris: 0xffe23a, glow: [0xff6a3a, 0xffe23a], size: 3.2 } },
-  { name: '홍옥 철갑상어', zone: 'ruby', rarity: 'rare', w: [40, 160], perKg: 14000,
-    look: { L: 1.6, h: 0.26, w: 0.24, color: 0x6a1a22, belly: 0xffc8c0, fin: 0x4a0a14, snout: true, spikes: true, crystals: 0xff2a4a, glow: [0xff2a4a], size: 3.4 } },
-  { name: '루비 돛새치', zone: 'ruby', rarity: 'rare', w: [30, 120], perKg: 16000,
-    look: { L: 1.6, h: 0.3, w: 0.2, color: 0xb01a2a, belly: 0xffe0e0, fin: 0xff5a3a, snout: true, tallDorsal: true, smooth: true, pattern: 'stripes', pc: 0xff9a7a, size: 4.0 } },
+  { name: '루비 바위갑옷어', zone: 'ruby', rarity: 'rare', w: [20, 90], perKg: 20000,
+    look: { rk: 'golem', L: 1.1, h: 0.6, w: 0.55, color: 0x4a2a2a, belly: 0x6a3a36, fin: 0x3a2020, pc: 0x5a3430, gem: 0xff3a2a, glow: [0xff3a2a], size: 3.0 } },
+  { name: '홍옥 칼날왕', zone: 'ruby', rarity: 'rare', w: [15, 60], perKg: 18000,
+    look: { rk: 'blade', L: 1.0, h: 0.2, w: 0.07, color: 0xb8182a, belly: 0xffd0d8, fin: 0xffd84a, pc: 0xffe8a0, gem: 0xffd84a, glow: [0xffd84a], size: 3.4 } },
+  { name: '진홍 리본왕', zone: 'ruby', rarity: 'rare', w: [10, 40], perKg: 22000,
+    look: { rk: 'ribbon', L: 1.1, h: 0.16, w: 0.08, color: 0x5a0a1a, belly: 0xff8a9a, fin: 0xffd84a, pc: 0xff3a5a, gem: 0xffe23a, glow: [0xffe23a], size: 3.6 } },
+  { name: '거대 석류 오징어', zone: 'ruby', rarity: 'rare', w: [30, 120], perKg: 15000,
+    look: { rk: 'squid', L: 1.0, h: 0.34, w: 0.34, color: 0x6a0a1a, belly: 0xff9aa8, fin: 0xd8203a, pc: 0x8a1a2a, gem: 0xff4a6a, glow: [0xff4a6a], size: 3.6 } },
+  { name: '보석꽃 여왕어', zone: 'ruby', rarity: 'rare', w: [8, 30], perKg: 26000,
+    look: { rk: 'flower', L: 0.75, h: 0.42, w: 0.3, color: 0xffd0e0, belly: 0xffffff, fin: 0xff3a6a, pc: 0xffd84a, gem: 0xff2a4a, glow: [0xff2a4a], size: 2.6 } },
   // ---- 전설 ----
-  { name: '진홍 고래상어', zone: 'ruby', rarity: 'legendary', w: [1000, 3200], perKg: 1600,
-    look: { L: 2.0, h: 0.5, w: 0.5, color: 0x5a0a18, belly: 0xffd8d0, fin: 0x3a0610, pattern: 'spots', pc: 0xff7a8a, bigHead: true, smooth: true, glow: [0xff7a8a], iris: 0xffffff, size: 8.2 } },
-  { name: '루비 왕관 잉어', zone: 'ruby', rarity: 'legendary', w: [30, 90], perKg: 30000,
-    look: { L: 1.2, h: 0.44, w: 0.24, color: 0xd8203a, belly: 0xffe8c8, fin: 0xffd84a, whiskers: true, crown: true, pattern: 'scales', pc: 0xffd84a, iris: 0xffffff, glow: [0xffd84a], size: 3.2 } },
+  { name: '홍염 날개어', zone: 'ruby', rarity: 'legendary', w: [150, 600], perKg: 9000,
+    look: { rk: 'phoenix', L: 1.0, h: 0.42, w: 0.36, color: 0xc8202a, belly: 0xffd8a0, fin: 0xff3a1a, pc: 0xff8a2a, gem: 0xffd84a, iris: 0xffe23a, glow: [0xffd84a, 0xff8a2a], size: 4.6 } },
+  { name: '루비 심장 수호어', zone: 'ruby', rarity: 'legendary', w: [80, 300], perKg: 12000,
+    look: { rk: 'golem', L: 1.1, h: 0.6, w: 0.55, color: 0x2a1a1e, belly: 0x5a2a30, fin: 0xd8b040, pc: 0x3a2428, gem: 0xff1a3a, iris: 0xff2a4a, glow: [0xff1a3a], size: 4.0 } },
+  { name: '진홍 망치왕', zone: 'ruby', rarity: 'legendary', w: [200, 700], perKg: 6000,
+    look: { rk: 'hammer', L: 1.2, h: 0.3, w: 0.26, color: 0x8a0a1a, belly: 0xffd0c8, fin: 0x5a0610, pc: 0xffd84a, gem: 0xffd84a, glow: [0xffd84a], size: 6.0 } },
+  { name: '루비 고래거북', zone: 'ruby', rarity: 'legendary', w: [800, 2500], perKg: 2000,
+    look: { rk: 'turtle', L: 0.9, h: 0.36, w: 0.6, color: 0x5a1a1e, belly: 0xe8d0b0, fin: 0x4a2a24, pc: 0x8a2a30, gem: 0xff2a4a, glow: [0xff2a4a], size: 8.0 } },
+  { name: '천 개의 초롱 군주', zone: 'ruby', rarity: 'legendary', w: [5, 20], perKg: 150000,
+    look: { rk: 'lantern', crownR: true, L: 0.7, h: 0.5, w: 0.5, color: 0xffd0a0, belly: 0xfff4e0, fin: 0xd8203a, pc: 0xd8b040, gem: 0xff3a2a, glow: [0xff3a2a], size: 2.4 } },
   // ---- 신화 ----
-  { name: '홍옥 리바이어던', zone: 'ruby', rarity: 'mythic', w: [2500, 7000], perKg: 2600, huge: true,
-    look: { serpent: true, L: 3.0, h: 0.34, w: 0.3, color: 0x6a0a18, belly: 0xffb08a, fin: 0xff3a5a, pc: 0xffd84a, iris: 0xffe23a, glow: [0xff3a5a, 0xffd84a], size: 6.2 } },
-  // 루비 용왕: 루비 섬의 주인. 붉은 수정 비늘의 거대한 용
-  { name: '루비 용왕', zone: 'ruby', rarity: 'mythic', w: [1200, 3600], perKg: 5000, huge: true,
-    look: { dragon: true, L: 2.2, h: 0.5, w: 0.5, color: 0x8a0a1a, belly: 0xffc0a0, fin: 0xffc83a, pc: 0xff3a5a, iris: 0xffe23a, glow: [0xff3a5a, 0xffe23a], size: 6.6 } }
+  { name: '홍옥 바다용', zone: 'ruby', rarity: 'mythic', w: [1200, 3600], perKg: 5000, huge: true,
+    look: { rk: 'wyrm', L: 2.2, h: 0.5, w: 0.5, color: 0x8a0a1a, belly: 0xffc0a0, fin: 0xff3a5a, pc: 0xd8203a, gem: 0xffe23a, iris: 0xffe23a, glow: [0xffe23a], size: 6.6 } },
+  { name: '홍염 불사조', zone: 'ruby', rarity: 'mythic', w: [2500, 7000], perKg: 2600, huge: true,
+    look: { rk: 'phoenix', L: 1.0, h: 0.42, w: 0.36, color: 0xffd84a, belly: 0xfff0c0, fin: 0xff2a1a, pc: 0xff7a1a, gem: 0xffffff, iris: 0xff2a1a, glow: [0xffffff, 0xff7a1a, 0xff2a1a], size: 8.6 } }
+);
+
+// =========== 루비 신전 성소의 보스 (zone: 'boss') — 봉인을 풀면 신전 문이 열리고, 성소 연못에서만 한 번씩 나와요 ===========
+//  보스를 낚아야 루비 공방에서 그 낚싯대를 살 수 있어요. 일반 낚시로는 절대 안 나와요 (박물관 어항도 없어요)
+FISH.push(
+  { name: '성소의 홍염 수호룡', zone: 'boss', boss: 's1', rarity: 'mythic', w: [4000, 6000], perKg: 3000, huge: true,
+    look: { rk: 'wyrm', L: 2.2, h: 0.5, w: 0.5, color: 0xd8202a, belly: 0xffd890, fin: 0xff8a1a, pc: 0xffd84a, gem: 0xfff0a0, iris: 0xffffff, glow: [0xfff0a0, 0xff8a1a], size: 8.4 } },
+  { name: '루비 왕관의 군주', zone: 'boss', boss: 's2', rarity: 'mythic', w: [9000, 12000], perKg: 3000, huge: true,
+    look: { rk: 'phoenix', L: 1.0, h: 0.42, w: 0.36, color: 0x6a0a1a, belly: 0xffe0a0, fin: 0xffd84a, pc: 0xff2a4a, gem: 0xffffff, iris: 0xffd84a, glow: [0xffffff, 0xffd84a, 0xff2a4a], size: 10.5 } }
 );
 
 // 물고기가 사는 곳: 'lake'(큰 호수·개울) 또는 'mountain'(산 위 연못)
@@ -389,8 +399,8 @@ function rollNormal(luck, zone) {
   let r = Math.random(), rarity = 'mythic';
   for (const [k, v] of Object.entries(odds)) { if (r < v) { rarity = k; break; } r -= v; }
   // 비 물고기(weather)는 평소에는 안 나와요
-  let pool = FISH.filter((f) => f.rarity === rarity && zoneOf(f) === zone && !f.weather && !f.season);
-  if (!pool.length) pool = FISH.filter((f) => zoneOf(f) === zone && !f.weather && !f.season);
+  let pool = FISH.filter((f) => f.rarity === rarity && zoneOf(f) === zone && !f.weather && !f.season && !f.boss);
+  if (!pool.length) pool = FISH.filter((f) => zoneOf(f) === zone && !f.weather && !f.season && !f.boss);
   return makeCatch(pool[Math.floor(Math.random() * pool.length)], luck);
 }
 // 고른 물고기에 무게·이로치·값을 붙여요
@@ -426,6 +436,9 @@ function makeCatch(f, luck) {
   const price = priceOf(f, weight, mut);
   return { name: f.name, weight, mut, price };
 }
+
+// 보스 물고기 한 마리 (성소 연못에서만): 무게 · 이로치 · 값은 보통 물고기처럼 붙어요
+export function makeBossCatch(name, luck) { const f = FISH.find((x) => x.name === name); return f ? makeCatch(f, luck) : null; }
 
 export function fmtKg(w) {
   if (w < 0.1) return w.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') + 'kg';
@@ -519,7 +532,10 @@ export function makeFishModel(f, mutName, weight) {
     add(e * 0.22, 0.01, e * 0.22, SHINE, x + e * 0.24, y + 0.015, z - e * 0.18);
   };
 
-  if (o.ray) {
+  if (o.rk) {
+    // 루비 섬 물고기: 새 생김새 (rubyfish.js)
+    buildRubyFishBody(o, add, eyeSide, L, H, W);
+  } else if (o.ray) {
     // 별무리 가오리: 넓적한 마름모 날개 + 긴 꼬리 + 등에 별무늬
     add(L * 0.6, H, W * 0.5, o.color, 0, 0, 0);
     for (const s of [-1, 1]) {
@@ -1023,9 +1039,26 @@ export function updateFishFx(t) {
     if (!g.parent) { if (fx.seen) FX.delete(g); continue; } // 화면에서 사라진 물고기는 잊어요
     fx.seen = true;
     const { names, pieces, L, H, W } = fx;
-    // ---------- 블록 자체의 빛 ----------
+    // ---------- 블록 자체의 빛 + 살짝 움직이기 ----------
+    //  골드: 금빛 물결이 몸을 따라 출렁 · 다크: 그림자가 일렁이며 블록이 살짝 흩어졌다 모여요
+    //  화이트: 숨 쉬듯 부풀었다 줄었다 · 얼음: 가끔 얼어붙듯 바르르 · 핏빛: 심장 박동에 맞춰 몸이 쿵쿵
+    //  알비노: 비눗방울처럼 말랑 출렁 · 방사능: 지직지직 경련 · 다이아: 블록마다 반짝 튀어나왔다 들어가요
     for (const p of pieces) {
       const u = p.userData, mt = u.mut, nx = (u.base0.x / (L || 1)) + 0.5; // 머리 쪽 1, 꼬리 쪽 0
+      if (mt !== '글리치' && u.base0) {
+        const b0 = u.base0, ph = u.ph0 ?? (u.ph0 = Math.random() * 6.28);
+        let dx = 0, dy = 0, dz = 0, sc = 1;
+        if (mt === '골드') { dy = Math.sin(t * 4 - nx * 7) * H * 0.04; sc = 1 + Math.max(0, Math.sin(t * 4 - nx * 7)) * 0.06; }
+        else if (mt === '다크') { const k = Math.sin(t * 1.3 + ph); dx = k * L * 0.012; dy = Math.cos(t * 1.7 + ph) * H * 0.03; dz = Math.sin(t * 2.1 + ph) * W * 0.06; }
+        else if (mt === '화이트') sc = 1 + Math.sin(t * 1.8) * 0.045;
+        else if (mt === '얼음') { const shiver = (t % 4) < 0.35 ? 1 : 0; dx = shiver * (Math.random() - 0.5) * L * 0.012; dz = shiver * (Math.random() - 0.5) * W * 0.05; }
+        else if (mt === '핏빛') { const beat = (t * 1.1) % 1, pulse = Math.exp(-((beat - 0.08) ** 2) * 600) + Math.exp(-((beat - 0.26) ** 2) * 600) * 0.7; sc = 1 + pulse * 0.09; dy = b0.y * pulse * 0.08; dz = b0.z * pulse * 0.12; }
+        else if (mt === '알비노') { dy = Math.sin(t * 2.4 + nx * 5) * H * 0.035; sc = 1 + Math.sin(t * 2.4 + nx * 5 + 1) * 0.04; }
+        else if (mt === '방사능') { if (Math.random() < 0.06) u.tw = t + 0.07; if (u.tw > t) { dx = (Math.random() - 0.5) * L * 0.05; dy = (Math.random() - 0.5) * H * 0.12; } }
+        else if (mt === '다이아') { const pop = u.flashUntil > t ? 1 : 0; dz = Math.sign(b0.z || 1) * pop * W * 0.08; sc = 1 + pop * 0.12; }
+        p.position.set(b0.x + dx, b0.y + dy, b0.z + dz);
+        p.scale.setScalar(sc);
+      }
       if (mt === '골드') {
         // 금빛 광택이 꼬리→머리로 훑고 지나가요
         const sweep = Math.exp(-((nx - ((t * 0.7) % 1.6 - 0.3)) ** 2) * 40);
@@ -1060,8 +1093,9 @@ export function updateFishFx(t) {
       if (t > fx.glitchUntil) {
         for (const p of pieces) {
           const u = p.userData;
+          if (u.mut !== '글리치') { p.visible = true; continue; } // 다른 이로치 블록은 위에서 따로 움직여요
           p.position.copy(u.base0); p.visible = true; p.scale.set(1, 1, 1);
-          if (u.mut === '글리치') resetPiece(p);
+          resetPiece(p);
         }
         if (Math.random() < 0.4) {
           fx.glitchUntil = t + 0.03 + Math.random() * 0.1;
